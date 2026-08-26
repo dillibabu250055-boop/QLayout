@@ -41,7 +41,7 @@ class TestOptimizationImprovement:
         connections = _make_connections([("q0", "q1")], [1.0])
 
         result = optimize_layout(qubits, connections, constraints, CHIP_WIDTH, CHIP_HEIGHT)
-        assert result.after_lqs >= result.before_lqs
+        assert result.lqs_after >= result.lqs_before
 
     def test_hard_violations_never_increase_after_accepted_step(self):
         constraints = _make_constraints()
@@ -62,7 +62,7 @@ class TestDeterminism:
         result1 = optimize_layout(qubits, connections, constraints, CHIP_WIDTH, CHIP_HEIGHT)
         result2 = optimize_layout(qubits, connections, constraints, CHIP_WIDTH, CHIP_HEIGHT)
 
-        assert result1.after_lqs == result2.after_lqs
+        assert result1.lqs_after == result2.lqs_after
         assert result1.iterations == result2.iterations
         assert len(result1.movements) == len(result2.movements)
         for m1, m2 in zip(result1.movements, result2.movements):
@@ -79,7 +79,7 @@ class TestNoMovableQubits:
         connections = _make_connections([("q0", "q1")], [1.0])
 
         result = optimize_layout(qubits, connections, constraints, CHIP_WIDTH, CHIP_HEIGHT)
-        assert result.after_lqs == result.before_lqs
+        assert result.lqs_after == result.lqs_before
         assert result.movements == []
         assert result.stopped_reason == "no_movable_qubits"
 
@@ -97,7 +97,7 @@ class TestAllCandidatesInvalid:
         connections = _make_connections([("q0", "q1")], [1.0])
 
         result = optimize_layout(qubits, connections, constraints, 10.0, 10.0)
-        assert result.after_lqs == result.before_lqs
+        assert result.lqs_after == result.lqs_before
         assert result.movements == []
 
 
@@ -113,6 +113,6 @@ class TestUnconnectedHighRiskTargeting:
         initial_lqs = compute_lqs(qubits, connections)
         result = optimize_layout(qubits, connections, constraints, CHIP_WIDTH, CHIP_HEIGHT)
 
-        assert result.before_lqs == initial_lqs
-        assert result.after_lqs >= result.before_lqs
-        assert result.movements == [] or result.after_lqs >= result.before_lqs
+        assert result.lqs_before == initial_lqs
+        assert result.lqs_after >= result.lqs_before
+        assert result.movements == [] or result.lqs_after >= result.lqs_before

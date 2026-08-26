@@ -1,5 +1,5 @@
 import pytest
-from models.schema import Qubit, Connection, ChipConstraints, RiskResult
+from models.schema import Qubit, Connection, ChipConstraints, RiskResult, Project
 from core.q_drc import (
     validate_layout,
     check_boundary,
@@ -7,7 +7,7 @@ from core.q_drc import (
     check_frequency_collisions,
     severity_from_penalty,
 )
-from core.scoring import compute_lqs, explain_risk
+from core.scoring import compute_lqs, explain_risk, get_severity_from_penalty
 
 
 CHIP_WIDTH = 100.0
@@ -151,19 +151,136 @@ class TestFrequency:
 
 class TestSeverityClassification:
     def test_low_severity(self):
-        assert severity_from_penalty(0.1) == "LOW"
         assert severity_from_penalty(0.0) == "LOW"
-        assert severity_from_penalty(0.29) == "LOW"
+        assert severity_from_penalty(0.299999) == "LOW"
+        assert severity_from_penalty(0.1) == "LOW"
 
     def test_medium_severity(self):
-        assert severity_from_penalty(0.3) == "MEDIUM"
+        assert severity_from_penalty(0.30) == "MEDIUM"
         assert severity_from_penalty(0.5) == "MEDIUM"
         assert severity_from_penalty(0.65) == "MEDIUM"
 
     def test_high_severity(self):
+        assert severity_from_penalty(0.650001) == "HIGH"
         assert severity_from_penalty(0.66) == "HIGH"
-        assert severity_from_penalty(0.8) == "HIGH"
         assert severity_from_penalty(1.0) == "HIGH"
+
+    def test_canonical_get_severity_matches_q_drc(self):
+        for value in [0.0, 0.299999, 0.30, 0.65, 0.650001, 1.0]:
+            assert get_severity_from_penalty(value) == severity_from_penalty(value)
+
+
+class TestQubitValidation:
+    def test_negative_x_raises(self):
+        with pytest.raises(ValueError, match="x_um"):
+            Qubit(id="q0", x_um=-1.0, y_um=0.0, frequency_mhz=5000.0, movable=True)
+
+    def test_negative_y_raises(self):
+        with pytest.raises(ValueError, match="y_um"):
+            Qubit(id="q0", x_um=0.0, y_um=-1.0, frequency_mhz=5000.0, movable=True)
+
+    def test_zero_frequency_raises(self):
+        with pytest.raises(ValueError, match="frequency_mhz"):
+            Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=0.0, movable=True)
+
+    def test_negative_frequency_raises(self):
+        with pytest.raises(ValueError, match="frequency_mhz"):
+            Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=-100.0, movable=True)
+
+
+class TestProjectValidation:
+    def test_empty_qubit_id_raises(self):
+        q = Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=5000.0, movable=True)
+        with pytest.raises(ValueError, match="Qubit IDs"):
+            Project(
+                id="p1",
+                name="demo",
+                chip_width_um=100.0,
+                chip_height_um=100.0,
+                constraints=_make_constraints(),
+                qubits=[Qubit(id="", x_um=1.0, y_um=1.0, frequency_mhz=5000.0, movable=True)],
+                connections=[],
+            )
+
+    def test_duplicate_qubit_ids_raises(self):
+        qubits = [
+            Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=5000.0, movable=True),
+            Qubit(id="q0", x_um=2.0, y_um=2.0, frequency_mhz=5100.0, movable=True),
+        ]
+        with pytest.raises(ValueError, match="unique"):
+            Project(
+                id="p1",
+                name="demo",
+                chip_width_um=100.0,
+                chip_height_um=100.0,
+                constraints=_make_constraints(),
+                qubits=qubits,
+                connections=[],
+            )
+
+    def test_unknown_connection_endpoint_raises(self):
+        qubits = [Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=5000.0, movable=True)]
+        with pytest.raises(ValueError, match="unknown qubit IDs"):
+            Project(
+                id="p1",
+                name="demo",
+                chip_width_um=100.0,
+                chip_height_um=100.0,
+                constraints=_make_constraints(),
+                qubits=qubits,
+                connections=[Connection(source_qubit_id="q0", target_qubit_id="q1", interaction_weight=1.0, gate_count=1)],
+            )
+
+    def test_self_connection_raises(self):
+        qubits = [Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=5000.0, movable=True)]
+        with pytest.raises(ValueError, match="cannot connect to itself"):
+            Project(
+                id="p1",
+                name="demo",
+                chip_width_um=100.0,
+                chip_height_um=100.0,
+                constraints=_make_constraints(),
+                qubits=qubits,
+                connections=[Connection(source_qubit_id="q0", target_qubit_id="q0", interaction_weight=1.0, gate_count=1)],
+            )
+
+    def test_duplicate_connection_raises(self):
+        qubits = [
+            Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=5000.0, movable=True),
+            Qubit(id="q1", x_um=5.0, y_um=0.0, frequency_mhz=5100.0, movable=True),
+        ]
+        with pytest.raises(ValueError, match="Duplicate logical connection"):
+            Project(
+                id="p1",
+                name="demo",
+                chip_width_um=100.0,
+                chip_height_um=100.0,
+                constraints=_make_constraints(),
+                qubits=qubits,
+                connections=[
+                    Connection(source_qubit_id="q0", target_qubit_id="q1", interaction_weight=1.0, gate_count=1),
+                    Connection(source_qubit_id="q0", target_qubit_id="q1", interaction_weight=1.0, gate_count=1),
+                ],
+            )
+
+    def test_reversed_connection_raises(self):
+        qubits = [
+            Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=5000.0, movable=True),
+            Qubit(id="q1", x_um=5.0, y_um=0.0, frequency_mhz=5100.0, movable=True),
+        ]
+        with pytest.raises(ValueError, match="Duplicate logical connection"):
+            Project(
+                id="p1",
+                name="demo",
+                chip_width_um=100.0,
+                chip_height_um=100.0,
+                constraints=_make_constraints(),
+                qubits=qubits,
+                connections=[
+                    Connection(source_qubit_id="q0", target_qubit_id="q1", interaction_weight=1.0, gate_count=1),
+                    Connection(source_qubit_id="q1", target_qubit_id="q0", interaction_weight=1.0, gate_count=1),
+                ],
+            )
 
 
 class TestLQS:

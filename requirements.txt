@@ -1,6 +1,3 @@
 streamlit
 numpy
-scipy
-networkx
 plotly
-matplotlib

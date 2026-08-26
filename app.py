@@ -532,7 +532,7 @@ def main():
 
             st.success(
                 f"Optimization complete!\n"
-                f"Before LQS: {result.before_lqs:.1f} → After LQS: {result.after_lqs:.1f}\n"
+                f"Before LQS: {result.lqs_before:.1f} → After LQS: {result.lqs_after:.1f}\n"
                 f"Iterations: {result.iterations} | Stopped: {result.stopped_reason}"
             )
 

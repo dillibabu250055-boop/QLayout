@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Set, Tuple
 import numpy as np
 
+from core.scoring import get_severity_from_penalty
 from models.schema import Qubit, Connection, ChipConstraints
 
 
@@ -129,8 +130,4 @@ def validate_layout(
 
 
 def severity_from_penalty(penalty: float) -> str:
-    if penalty > 0.65:
-        return "HIGH"
-    if penalty >= 0.3:
-        return "MEDIUM"
-    return "LOW"
+    return get_severity_from_penalty(penalty)

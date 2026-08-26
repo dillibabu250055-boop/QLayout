@@ -18,6 +18,14 @@ class Qubit:
     frequency_mhz: float
     movable: bool
 
+    def __post_init__(self):
+        if self.x_um < 0:
+            raise ValueError("Qubit x_um must be >= 0")
+        if self.y_um < 0:
+            raise ValueError("Qubit y_um must be >= 0")
+        if self.frequency_mhz <= 0:
+            raise ValueError("Qubit frequency_mhz must be > 0")
+
 
 @dataclass
 class Connection:
@@ -49,15 +57,13 @@ class RiskResult:
 
 @dataclass
 class OptimizationResult:
-    before_lqs: float
-    after_lqs: float
+    lqs_before: float
+    lqs_after: float
     improvement_percent: float
     iterations: int
     movements: List[Dict]
     violations_before: int
     violations_after: int
-    lqs_before: float
-    lqs_after: float
     stopped_reason: str
 
 
@@ -70,3 +76,22 @@ class Project:
     constraints: ChipConstraints
     qubits: List[Qubit]
     connections: List[Connection]
+
+    def __post_init__(self):
+        qubit_ids = [q.id for q in self.qubits]
+        if any(not str(qid).strip() for qid in qubit_ids):
+            raise ValueError("Qubit IDs must be non-empty")
+        if len(qubit_ids) != len(set(qubit_ids)):
+            raise ValueError("Qubit IDs must be unique")
+
+        valid_ids = set(qubit_ids)
+        seen_pairs = set()
+        for conn in self.connections:
+            if conn.source_qubit_id not in valid_ids or conn.target_qubit_id not in valid_ids:
+                raise ValueError("Connection references unknown qubit IDs")
+            if conn.source_qubit_id == conn.target_qubit_id:
+                raise ValueError("A qubit cannot connect to itself")
+            pair = frozenset({conn.source_qubit_id, conn.target_qubit_id})
+            if pair in seen_pairs:
+                raise ValueError("Duplicate logical connection is not allowed")
+            seen_pairs.add(pair)

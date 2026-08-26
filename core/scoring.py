@@ -2,20 +2,29 @@ from typing import List, Dict, Any
 import numpy as np
 
 from models.schema import Qubit, Connection, RiskResult
-from core.physics_engine import (
-    _build_arrays,
-    compute_euclidean_distance,
-    compute_normalized_distance,
-    compute_spatial_risk,
-    compute_spectral_risk,
-    compute_base_interaction_risk,
-    compute_unintended_risk,
-    compute_routing_cost,
-    compute_objective_penalty,
-)
+
+
+def get_severity_from_penalty(penalty: float) -> str:
+    if penalty > 0.65:
+        return "HIGH"
+    if penalty >= 0.30:
+        return "MEDIUM"
+    return "LOW"
 
 
 def compute_lqs(qubits: List[Qubit], connections: List[Connection]) -> float:
+    from core.physics_engine import (
+        _build_arrays,
+        compute_euclidean_distance,
+        compute_normalized_distance,
+        compute_spatial_risk,
+        compute_spectral_risk,
+        compute_base_interaction_risk,
+        compute_unintended_risk,
+        compute_routing_cost,
+        compute_objective_penalty,
+    )
+
     _, coords, freqs, I = _build_arrays(qubits, connections)
     n = len(qubits)
     if n < 2:

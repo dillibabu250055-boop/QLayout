@@ -45,13 +45,11 @@
 - severity: str               # 'HIGH' (>0.65), 'MEDIUM' (0.3-0.65), 'LOW' (<0.3)
 
 **OptimizationResult**
-- before_lqs: float
-- after_lqs: float
+- lqs_before: float
+- lqs_after: float
 - improvement_percent: float
 - iterations: int
 - movements: list[dict]
 - violations_before: int
 - violations_after: int
-- lqs_before: float
-- lqs_after: float
 - stopped_reason: str

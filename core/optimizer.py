@@ -9,7 +9,6 @@ from core.physics_engine import build_risk_results
 MAX_ITERATIONS = 500
 PATIENCE = 50
 STEP_SIZE_UM = 5.0
-RANDOM_SEED = 42
 
 DIRECTIONS = [
     (0.0, 1.0),
@@ -92,7 +91,7 @@ def optimize_layout(
 ) -> OptimizationResult:
     current_qubits = _copy_qubits(qubits)
 
-    before_lqs = compute_lqs(current_qubits, connections)
+    lqs_before = compute_lqs(current_qubits, connections)
     before_drc = validate_layout(current_qubits, constraints, connections, chip_width_um, chip_height_um)
     violations_before = _count_violations(before_drc)
 
@@ -162,24 +161,22 @@ def optimize_layout(
         current_qubits = best_candidate
         patience_counter = 0
 
-    after_lqs = compute_lqs(current_qubits, connections)
+    lqs_after = compute_lqs(current_qubits, connections)
     after_drc = validate_layout(current_qubits, constraints, connections, chip_width_um, chip_height_um)
     violations_after = _count_violations(after_drc)
 
-    if before_lqs > 0:
-        improvement_percent = ((after_lqs - before_lqs) / before_lqs) * 100.0
+    if lqs_before > 0:
+        improvement_percent = ((lqs_after - lqs_before) / lqs_before) * 100.0
     else:
         improvement_percent = 0.0
 
     return OptimizationResult(
-        before_lqs=before_lqs,
-        after_lqs=after_lqs,
+        lqs_before=lqs_before,
+        lqs_after=lqs_after,
         improvement_percent=improvement_percent,
         iterations=iterations,
         movements=movements,
         violations_before=violations_before,
         violations_after=violations_after,
-        lqs_before=before_lqs,
-        lqs_after=after_lqs,
         stopped_reason=stopped_reason,
     )

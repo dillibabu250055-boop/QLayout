@@ -92,12 +92,14 @@ def build_risk_results(qubits: List[Qubit], connections: List[Connection]) -> Li
         pair = tuple(sorted((i, j)))
         connection_map[pair] = float(conn.interaction_weight)
 
+    from core.scoring import get_severity_from_penalty
+
     results: List[RiskResult] = []
     for i, j in combinations(range(len(qubits)), 2):
         pair = (i, j)
         interaction_weight = connection_map.get(pair, 0.0)
         penalty = float(P[i, j])
-        sev = "HIGH" if penalty > 0.65 else ("MEDIUM" if penalty >= 0.3 else "LOW")
+        sev = get_severity_from_penalty(penalty)
 
         results.append(RiskResult(
             source_qubit_id=qubits[i].id,
