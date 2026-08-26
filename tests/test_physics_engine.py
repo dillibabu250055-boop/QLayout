@@ -227,6 +227,16 @@ class TestBuildRiskResults(unittest.TestCase):
         self.assertEqual(results[0].interaction_weight, 0.0)
         self.assertGreater(results[0].unintended_risk, 0.0)
 
+    def test_empty_qubits_return_empty_results(self):
+        self.assertEqual(build_risk_results([], []), [])
+        self.assertEqual(compute_euclidean_distance([], []).shape, (0, 0))
+
+    def test_single_qubit_returns_zero_matrix(self):
+        qubit = Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=5000.0, movable=True)
+        d = compute_euclidean_distance([qubit], [])
+        self.assertEqual(d.shape, (1, 1))
+        self.assertTrue(np.allclose(d, np.zeros((1, 1))))
+
     def test_fields_populated(self):
         qubits = _make_qubits()
         conns = _make_connections()

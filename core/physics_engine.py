@@ -11,6 +11,9 @@ W_R: float = 0.30
 
 
 def _build_arrays(qubits: List[Qubit], connections: List[Connection]) -> Tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
+    if not qubits:
+        return {}, np.empty((0, 2), dtype=float), np.empty((0,), dtype=float), np.zeros((0, 0), dtype=float)
+
     id_to_idx = {q.id: i for i, q in enumerate(qubits)}
     coords = np.array([[q.x_um, q.y_um] for q in qubits], dtype=float).reshape(-1, 2)
     freqs = np.array([q.frequency_mhz for q in qubits], dtype=float)
