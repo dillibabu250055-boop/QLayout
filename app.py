@@ -54,6 +54,18 @@ def _make_demo_dataset():
     return qubits, connections
 
 
+def _make_blank_project():
+    return Project(
+        id="blank",
+        name="Blank Chip",
+        chip_width_um=CHIP_WIDTH,
+        chip_height_um=CHIP_HEIGHT,
+        constraints=_make_constraints(),
+        qubits=[],
+        connections=[],
+    )
+
+
 def _get_project():
     return st.session_state.get("project")
 
@@ -62,20 +74,19 @@ def _set_project(project):
     st.session_state["project"] = project
 
 
+def _next_qubit_id(project):
+    used_ids = {q.id for q in project.qubits}
+    index = 0
+    while True:
+        candidate = f"Q{index}"
+        if candidate not in used_ids:
+            return candidate
+        index += 1
+
+
 def _init_session_state():
     if "project" not in st.session_state:
-        qubits, connections = _make_demo_dataset()
-        constraints = _make_constraints()
-        project = Project(
-            id="demo",
-            name="Demo Chip",
-            chip_width_um=CHIP_WIDTH,
-            chip_height_um=CHIP_HEIGHT,
-            constraints=constraints,
-            qubits=qubits,
-            connections=connections,
-        )
-        _set_project(project)
+        _set_project(_make_blank_project())
 
 
 def _apply_movements(qubits, movements):
@@ -276,6 +287,7 @@ def main():
 
     with st.sidebar:
         st.header("Project")
+
         if st.button("Load Demo Chip"):
             qubits, connections = _make_demo_dataset()
             constraints = _make_constraints()
@@ -290,6 +302,150 @@ def main():
             )
             _set_project(project)
             st.rerun()
+
+        if st.button("Create Blank Project"):
+            _set_project(_make_blank_project())
+            st.rerun()
+
+        with st.expander("Configure Chip", expanded=True):
+            project.name = st.text_input("Project name", value=project.name)
+            project.chip_width_um = st.number_input(
+                "Chip width (um)",
+                min_value=10.0,
+                value=float(project.chip_width_um),
+                step=1.0,
+            )
+            project.chip_height_um = st.number_input(
+                "Chip height (um)",
+                min_value=10.0,
+                value=float(project.chip_height_um),
+                step=1.0,
+            )
+            project.constraints.min_qubit_spacing_um = st.number_input(
+                "Min qubit spacing (um)",
+                min_value=0.1,
+                value=float(project.constraints.min_qubit_spacing_um),
+                step=0.5,
+            )
+            project.constraints.min_frequency_separation_mhz = st.number_input(
+                "Min frequency separation (MHz)",
+                min_value=1.0,
+                value=float(project.constraints.min_frequency_separation_mhz),
+                step=1.0,
+            )
+            project.constraints.frequency_check_distance_um = st.number_input(
+                "Frequency check distance (um)",
+                min_value=0.1,
+                value=float(project.constraints.frequency_check_distance_um),
+                step=0.5,
+            )
+            project.constraints.min_boundary_clearance_um = st.number_input(
+                "Min boundary clearance (um)",
+                min_value=0.0,
+                value=float(project.constraints.min_boundary_clearance_um),
+                step=0.5,
+            )
+            _set_project(project)
+
+        with st.expander("Qubit Manager", expanded=True):
+            if not project.qubits:
+                st.info("No qubits yet. Add a few to begin layout analysis.")
+
+            with st.form("add_qubit_form", clear_on_submit=True):
+                qubit_id = st.text_input("Qubit ID", value=_next_qubit_id(project))
+                x_um = st.number_input("X (um)", min_value=0.0, value=10.0, step=1.0)
+                y_um = st.number_input("Y (um)", min_value=0.0, value=10.0, step=1.0)
+                frequency_mhz = st.number_input("Frequency (MHz)", min_value=0.0, value=5000.0, step=10.0)
+                movable = st.checkbox("Movable", value=True)
+                submitted = st.form_submit_button("Add Qubit")
+
+            if submitted:
+                clean_id = qubit_id.strip() or _next_qubit_id(project)
+                if any(existing.id == clean_id for existing in project.qubits):
+                    st.warning(f"Qubit '{clean_id}' already exists.")
+                else:
+                    project.qubits.append(
+                        Qubit(
+                            id=clean_id,
+                            x_um=float(x_um),
+                            y_um=float(y_um),
+                            frequency_mhz=float(frequency_mhz),
+                            movable=movable,
+                        )
+                    )
+                    _set_project(project)
+                    st.success(f"Added {clean_id}.")
+
+            if project.qubits:
+                st.markdown("**Current Qubits**")
+                for q in project.qubits:
+                    cols = st.columns([3, 1])
+                    cols[0].write(f"{q.id}: ({q.x_um:.1f}, {q.y_um:.1f}) @ {q.frequency_mhz:.0f} MHz")
+                    if cols[1].button("Remove", key=f"remove_qubit_{q.id}"):
+                        project.qubits = [existing for existing in project.qubits if existing.id != q.id]
+                        project.connections = [
+                            conn for conn in project.connections
+                            if conn.source_qubit_id != q.id and conn.target_qubit_id != q.id
+                        ]
+                        _set_project(project)
+                        st.rerun()
+
+        with st.expander("Connection Builder", expanded=True):
+            qubit_ids = [q.id for q in project.qubits]
+            if len(qubit_ids) < 2:
+                st.info("Add at least two qubits to create a connection.")
+            else:
+                with st.form("add_connection_form", clear_on_submit=True):
+                    source_qubit_id = st.selectbox("Source Qubit", options=qubit_ids)
+                    target_qubit_id = st.selectbox(
+                        "Target Qubit",
+                        options=[q_id for q_id in qubit_ids if q_id != source_qubit_id],
+                    )
+                    interaction_weight = st.slider("Interaction weight (I_ij)", 0.0, 1.0, 0.5, 0.01)
+                    gate_count = st.number_input("Gate count", min_value=1, value=1, step=1)
+                    submitted = st.form_submit_button("Add Connection")
+
+                if submitted:
+                    if source_qubit_id == target_qubit_id:
+                        st.warning("A qubit cannot be connected to itself.")
+                    else:
+                        pair_exists = any(
+                            (
+                                (conn.source_qubit_id == source_qubit_id and conn.target_qubit_id == target_qubit_id)
+                                or (conn.source_qubit_id == target_qubit_id and conn.target_qubit_id == source_qubit_id)
+                            )
+                            for conn in project.connections
+                        )
+                        if pair_exists:
+                            st.warning("This connection already exists.")
+                        else:
+                            project.connections.append(
+                                Connection(
+                                    source_qubit_id=source_qubit_id,
+                                    target_qubit_id=target_qubit_id,
+                                    interaction_weight=float(interaction_weight),
+                                    gate_count=int(gate_count),
+                                )
+                            )
+                            _set_project(project)
+                            st.success(f"Connected {source_qubit_id} to {target_qubit_id}.")
+
+            if project.connections:
+                st.markdown("**Current Connections**")
+                for conn in project.connections:
+                    label = f"{conn.source_qubit_id} → {conn.target_qubit_id} (I={conn.interaction_weight:.2f})"
+                    cols = st.columns([4, 1])
+                    cols[0].write(label)
+                    if cols[1].button("Remove", key=f"remove_conn_{conn.source_qubit_id}_{conn.target_qubit_id}"):
+                        project.connections = [
+                            existing for existing in project.connections
+                            if not (
+                                existing.source_qubit_id == conn.source_qubit_id
+                                and existing.target_qubit_id == conn.target_qubit_id
+                            )
+                        ]
+                        _set_project(project)
+                        st.rerun()
 
         st.subheader("Export")
         if st.button("Export Layout"):

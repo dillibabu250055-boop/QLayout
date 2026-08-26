@@ -11,11 +11,13 @@ W_R: float = 0.30
 
 def _build_arrays(qubits: List[Qubit], connections: List[Connection]) -> Tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
     id_to_idx = {q.id: i for i, q in enumerate(qubits)}
-    coords = np.array([[q.x_um, q.y_um] for q in qubits], dtype=float)
+    coords = np.array([[q.x_um, q.y_um] for q in qubits], dtype=float).reshape(-1, 2)
     freqs = np.array([q.frequency_mhz for q in qubits], dtype=float)
     n = len(qubits)
     I = np.zeros((n, n), dtype=float)
     for conn in connections:
+        if conn.source_qubit_id not in id_to_idx or conn.target_qubit_id not in id_to_idx:
+            continue
         i = id_to_idx[conn.source_qubit_id]
         j = id_to_idx[conn.target_qubit_id]
         val = float(conn.interaction_weight)
@@ -25,6 +27,8 @@ def _build_arrays(qubits: List[Qubit], connections: List[Connection]) -> Tuple[d
 
 
 def compute_euclidean_distance(qubits: List[Qubit], connections: List[Connection]) -> np.ndarray:
+    if len(qubits) < 2:
+        return np.zeros((len(qubits), len(qubits)), dtype=float)
     _, coords, _, _ = _build_arrays(qubits, connections)
     diff = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
     d_ij = np.sqrt(np.sum(diff ** 2, axis=-1))
@@ -62,6 +66,9 @@ def compute_objective_penalty(R_unintended: np.ndarray, C_routing: np.ndarray) -
 
 
 def build_risk_results(qubits: List[Qubit], connections: List[Connection]) -> List[RiskResult]:
+    if len(qubits) < 2:
+        return []
+
     id_to_idx, coords, freqs, I = _build_arrays(qubits, connections)
 
     d_ij = compute_euclidean_distance(qubits, connections)
@@ -76,6 +83,8 @@ def build_risk_results(qubits: List[Qubit], connections: List[Connection]) -> Li
     results: List[RiskResult] = []
     seen = set()
     for conn in connections:
+        if conn.source_qubit_id not in id_to_idx or conn.target_qubit_id not in id_to_idx:
+            continue
         i = id_to_idx[conn.source_qubit_id]
         j = id_to_idx[conn.target_qubit_id]
         if i == j:

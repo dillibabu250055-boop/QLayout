@@ -172,6 +172,10 @@ class TestLQS:
         lqs = compute_lqs(qubits, [])
         assert 0.0 <= lqs <= 100.0
 
+    def test_lqs_empty_layout_returns_perfect_score(self):
+        assert compute_lqs([], []) == 100.0
+        assert compute_lqs([_make_qubits([(0.0, 0.0)])[0]], []) == 100.0
+
     def test_lqs_perfect_layout(self):
         qubits = _make_qubits([(0.0, 0.0), (50.0, 50.0)])
         qubits[1].frequency_mhz = 6000.0
