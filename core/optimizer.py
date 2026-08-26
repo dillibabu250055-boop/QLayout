@@ -1,4 +1,3 @@
-import random
 from typing import List, Dict, Optional
 
 from models.schema import Qubit, Connection, ChipConstraints, OptimizationResult
@@ -39,9 +38,6 @@ def _select_target_qubit(
     chip_width_um: float,
     chip_height_um: float,
 ) -> Optional[Qubit]:
-    if not connections:
-        return None
-
     drc_result = validate_layout(qubits, constraints, connections, chip_width_um, chip_height_um)
 
     violating_qubit_ids = set()
@@ -94,8 +90,6 @@ def optimize_layout(
     chip_width_um: float,
     chip_height_um: float,
 ) -> OptimizationResult:
-    random.seed(RANDOM_SEED)
-
     current_qubits = _copy_qubits(qubits)
 
     before_lqs = compute_lqs(current_qubits, connections)
@@ -185,7 +179,7 @@ def optimize_layout(
         movements=movements,
         violations_before=violations_before,
         violations_after=violations_after,
-        objective_before=before_lqs,
-        objective_after=after_lqs,
+        lqs_before=before_lqs,
+        lqs_after=after_lqs,
         stopped_reason=stopped_reason,
     )

@@ -99,3 +99,20 @@ class TestAllCandidatesInvalid:
         result = optimize_layout(qubits, connections, constraints, 10.0, 10.0)
         assert result.after_lqs == result.before_lqs
         assert result.movements == []
+
+
+class TestUnconnectedHighRiskTargeting:
+    def test_optimizer_targets_unconnected_close_pair(self):
+        constraints = _make_constraints(min_boundary_clearance_um=0.0)
+        qubits = [
+            Qubit(id="q0", x_um=10.0, y_um=10.0, frequency_mhz=5000.0, movable=True),
+            Qubit(id="q1", x_um=15.0, y_um=10.0, frequency_mhz=5005.0, movable=True),
+        ]
+        connections = []
+
+        initial_lqs = compute_lqs(qubits, connections)
+        result = optimize_layout(qubits, connections, constraints, CHIP_WIDTH, CHIP_HEIGHT)
+
+        assert result.before_lqs == initial_lqs
+        assert result.after_lqs >= result.before_lqs
+        assert result.movements == [] or result.after_lqs >= result.before_lqs

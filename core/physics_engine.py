@@ -1,4 +1,5 @@
 import numpy as np
+from itertools import combinations
 from typing import List, Tuple
 from models.schema import Qubit, Connection, RiskResult
 
@@ -69,7 +70,7 @@ def build_risk_results(qubits: List[Qubit], connections: List[Connection]) -> Li
     if len(qubits) < 2:
         return []
 
-    id_to_idx, coords, freqs, I = _build_arrays(qubits, connections)
+    id_to_idx, _, freqs, I = _build_arrays(qubits, connections)
 
     d_ij = compute_euclidean_distance(qubits, connections)
     d_norm = compute_normalized_distance(d_ij)
@@ -80,8 +81,7 @@ def build_risk_results(qubits: List[Qubit], connections: List[Connection]) -> Li
     C_routing = compute_routing_cost(I, d_norm)
     P = compute_objective_penalty(R_unintended, C_routing)
 
-    results: List[RiskResult] = []
-    seen = set()
+    connection_map = {}
     for conn in connections:
         if conn.source_qubit_id not in id_to_idx or conn.target_qubit_id not in id_to_idx:
             continue
@@ -89,11 +89,13 @@ def build_risk_results(qubits: List[Qubit], connections: List[Connection]) -> Li
         j = id_to_idx[conn.target_qubit_id]
         if i == j:
             continue
-        pair = (i, j) if i < j else (j, i)
-        if pair in seen:
-            continue
-        seen.add(pair)
+        pair = tuple(sorted((i, j)))
+        connection_map[pair] = float(conn.interaction_weight)
 
+    results: List[RiskResult] = []
+    for i, j in combinations(range(len(qubits)), 2):
+        pair = (i, j)
+        interaction_weight = connection_map.get(pair, 0.0)
         penalty = float(P[i, j])
         sev = "HIGH" if penalty > 0.65 else ("MEDIUM" if penalty >= 0.3 else "LOW")
 
@@ -105,7 +107,7 @@ def build_risk_results(qubits: List[Qubit], connections: List[Connection]) -> Li
             spatial_risk=float(S[i, j]),
             spectral_risk=float(F[i, j]),
             base_interaction_risk=float(R[i, j]),
-            interaction_weight=float(I[i, j]),
+            interaction_weight=interaction_weight,
             unintended_risk=float(R_unintended[i, j]),
             routing_cost=float(C_routing[i, j]),
             objective_penalty=penalty,

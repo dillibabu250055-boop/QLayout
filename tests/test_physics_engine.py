@@ -213,7 +213,19 @@ class TestBuildRiskResults(unittest.TestCase):
         conns = _make_connections()
         results = build_risk_results(qubits, conns)
         self.assertIsInstance(results, list)
-        self.assertEqual(len(results), 2)
+        self.assertEqual(len(results), 3)
+
+    def test_unconnected_close_pair_detection(self):
+        qubits = [
+            Qubit(id="q0", x_um=0.0, y_um=0.0, frequency_mhz=5000.0, movable=True),
+            Qubit(id="q1", x_um=5.0, y_um=0.0, frequency_mhz=5005.0, movable=True),
+        ]
+        results = build_risk_results(qubits, [])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].source_qubit_id, "q0")
+        self.assertEqual(results[0].target_qubit_id, "q1")
+        self.assertEqual(results[0].interaction_weight, 0.0)
+        self.assertGreater(results[0].unintended_risk, 0.0)
 
     def test_fields_populated(self):
         qubits = _make_qubits()
@@ -237,5 +249,22 @@ class TestBuildRiskResults(unittest.TestCase):
             self.assertGreaterEqual(r.objective_penalty, 0.0)
             self.assertLessEqual(r.objective_penalty, 1.0)
 
+
+class TestConnectionValidation(unittest.TestCase):
+    def test_negative_weight_raises(self):
+        with self.assertRaises(ValueError):
+            Connection(source_qubit_id="q0", target_qubit_id="q1", interaction_weight=-0.1, gate_count=1)
+
+    def test_above_one_weight_raises(self):
+        with self.assertRaises(ValueError):
+            Connection(source_qubit_id="q0", target_qubit_id="q1", interaction_weight=1.1, gate_count=1)
+
+    def test_zero_weight_valid(self):
+        connection = Connection(source_qubit_id="q0", target_qubit_id="q1", interaction_weight=0.0, gate_count=1)
+        self.assertEqual(connection.interaction_weight, 0.0)
+
+    def test_one_weight_valid(self):
+        connection = Connection(source_qubit_id="q0", target_qubit_id="q1", interaction_weight=1.0, gate_count=1)
+        self.assertEqual(connection.interaction_weight, 1.0)
 
 

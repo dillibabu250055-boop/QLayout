@@ -26,6 +26,10 @@ class Connection:
     interaction_weight: float
     gate_count: int
 
+    def __post_init__(self):
+        if not 0.0 <= float(self.interaction_weight) <= 1.0:
+            raise ValueError("interaction_weight must be between 0.0 and 1.0")
+
 
 @dataclass
 class RiskResult:
@@ -52,8 +56,8 @@ class OptimizationResult:
     movements: List[Dict]
     violations_before: int
     violations_after: int
-    objective_before: float
-    objective_after: float
+    lqs_before: float
+    lqs_after: float
     stopped_reason: str
 
 

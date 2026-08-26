@@ -52,6 +52,6 @@
 - movements: list[dict]
 - violations_before: int
 - violations_after: int
-- objective_before: float
-- objective_after: float
+- lqs_before: float
+- lqs_after: float
 - stopped_reason: str
