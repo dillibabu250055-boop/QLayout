@@ -127,7 +127,3 @@ def validate_layout(
         violations=all_violations,
         warnings=freq_warnings
     )
-
-
-def severity_from_penalty(penalty: float) -> str:
-    return get_severity_from_penalty(penalty)

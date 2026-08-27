@@ -195,9 +195,20 @@ def _build_lqs_panel(project):
     qubits = project.qubits
     connections = project.connections
 
-    st.subheader("LQS Score")
+    st.subheader("Metrics")
     lqs = compute_lqs(qubits, connections)
-    st.metric("LQS", f"{lqs:.1f}")
+    st.metric("Layout Quality Score", f"{lqs:.1f} / 100")
+    
+    risk_results = build_risk_results(qubits, connections)
+    if not risk_results:
+        worst_pair_risk = 0.00
+    else:
+        worst_pair_risk = max(r.objective_penalty for r in risk_results)
+        
+    if worst_pair_risk > 0.65:
+        st.metric("Worst Pair Risk", f"{worst_pair_risk:.2f} 🔴")
+    else:
+        st.metric("Worst Pair Risk", f"{worst_pair_risk:.2f}")
 
 
 def _build_risk_panel(project):

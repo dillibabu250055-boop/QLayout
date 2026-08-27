@@ -20,7 +20,7 @@ Q-Layout replaces guesswork with a coupled spatial-spectral risk engine. Every q
 
 - **Quantum Design Rule Checker (Q-DRC):** Hard-constraint validation for boundary clearance, minimum qubit spacing, and frequency collisions (with intended-pair bypass and warning logging).
 - **Explainable Layout Quality Score (LQS):** A single 0–100 score backed by a physics-informed penalty model that distinguishes intended coupling (routing cost) from unintended crosstalk (spatial-spectral risk).
-- **Hill-Climbing Auto-Optimizer:** Deterministic, seed-locked optimizer that generates 8 directional candidate moves per iteration, rejects any candidate violating Q-DRC, and accepts moves only when LQS strictly improves—with full before/after telemetry and explainability.
+- **Hill-Climbing Auto-Optimizer:** Deterministic 8-direction hill-climbing optimizer that generates candidate moves per iteration, rejects any candidate violating Q-DRC, and accepts moves only when LQS strictly improves—with full before/after telemetry and explainability.
 - **Interactive Chip Canvas:** Dark-mode Plotly visualization with hover tooltips, severity-colored risk edges, and intended-connection overlays.
 - **Risk Explainability Panel:** Click any pair to see exactly why it was flagged—spatial proximity, spectral crowding, or routing inefficiency.
 - **JSON Export:** Download the current layout as a portable JSON specification for downstream EM workflows.
@@ -32,7 +32,7 @@ Q-Layout replaces guesswork with a coupled spatial-spectral risk engine. Every q
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/<your-org>/qlayout.git
+git clone https://github.com/dillibabu250055-boop/QLayout.git
 cd qlayout
 pip install -r requirements.txt
 streamlit run app.py
@@ -60,7 +60,7 @@ All optimization steps are logged in the success message: iterations run, final 
 | Component | Technology |
 |---|---|
 | Frontend / UI | Streamlit |
-| Numerical Computing | NumPy, SciPy |
+| Numerical Computing | NumPy |
 | Visualization | Plotly |
 | Optimization | Custom Hill-Climbing heuristic (Python) |
 | Data Persistence | JSON |

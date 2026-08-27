@@ -5,7 +5,6 @@ from core.q_drc import (
     check_boundary,
     check_spacing,
     check_frequency_collisions,
-    severity_from_penalty,
 )
 from core.scoring import compute_lqs, explain_risk, get_severity_from_penalty
 
@@ -151,23 +150,19 @@ class TestFrequency:
 
 class TestSeverityClassification:
     def test_low_severity(self):
-        assert severity_from_penalty(0.0) == "LOW"
-        assert severity_from_penalty(0.299999) == "LOW"
-        assert severity_from_penalty(0.1) == "LOW"
+        assert get_severity_from_penalty(0.0) == "LOW"
+        assert get_severity_from_penalty(0.299999) == "LOW"
+        assert get_severity_from_penalty(0.1) == "LOW"
 
     def test_medium_severity(self):
-        assert severity_from_penalty(0.30) == "MEDIUM"
-        assert severity_from_penalty(0.5) == "MEDIUM"
-        assert severity_from_penalty(0.65) == "MEDIUM"
+        assert get_severity_from_penalty(0.30) == "MEDIUM"
+        assert get_severity_from_penalty(0.5) == "MEDIUM"
+        assert get_severity_from_penalty(0.65) == "MEDIUM"
 
     def test_high_severity(self):
-        assert severity_from_penalty(0.650001) == "HIGH"
-        assert severity_from_penalty(0.66) == "HIGH"
-        assert severity_from_penalty(1.0) == "HIGH"
-
-    def test_canonical_get_severity_matches_q_drc(self):
-        for value in [0.0, 0.299999, 0.30, 0.65, 0.650001, 1.0]:
-            assert get_severity_from_penalty(value) == severity_from_penalty(value)
+        assert get_severity_from_penalty(0.650001) == "HIGH"
+        assert get_severity_from_penalty(0.66) == "HIGH"
+        assert get_severity_from_penalty(1.0) == "HIGH"
 
 
 class TestQubitValidation:
@@ -366,3 +361,30 @@ class TestExplainability:
         )
         explanation = explain_risk(result)
         assert explanation["reasons"] == ["Low overall risk"]
+
+
+class TestChipConstraintsValidation:
+    def test_negative_spacing_raises(self):
+        with pytest.raises(ValueError):
+            ChipConstraints(min_qubit_spacing_um=-1.0, min_frequency_separation_mhz=50.0, frequency_check_distance_um=20.0, min_boundary_clearance_um=5.0)
+
+    def test_negative_frequency_separation_raises(self):
+        with pytest.raises(ValueError):
+            ChipConstraints(min_qubit_spacing_um=10.0, min_frequency_separation_mhz=-10.0, frequency_check_distance_um=20.0, min_boundary_clearance_um=5.0)
+
+    def test_zero_frequency_check_distance_raises(self):
+        with pytest.raises(ValueError):
+            ChipConstraints(min_qubit_spacing_um=10.0, min_frequency_separation_mhz=50.0, frequency_check_distance_um=0.0, min_boundary_clearance_um=5.0)
+
+    def test_negative_frequency_check_distance_raises(self):
+        with pytest.raises(ValueError):
+            ChipConstraints(min_qubit_spacing_um=10.0, min_frequency_separation_mhz=50.0, frequency_check_distance_um=-5.0, min_boundary_clearance_um=5.0)
+
+    def test_negative_boundary_clearance_raises(self):
+        with pytest.raises(ValueError):
+            ChipConstraints(min_qubit_spacing_um=10.0, min_frequency_separation_mhz=50.0, frequency_check_distance_um=20.0, min_boundary_clearance_um=-1.0)
+
+    def test_valid_zero_boundary_values(self):
+        c = ChipConstraints(min_qubit_spacing_um=0.0, min_frequency_separation_mhz=0.0, frequency_check_distance_um=20.0, min_boundary_clearance_um=0.0)
+        assert c.min_qubit_spacing_um == 0.0
+

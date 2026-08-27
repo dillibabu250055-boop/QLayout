@@ -9,6 +9,16 @@ class ChipConstraints:
     frequency_check_distance_um: float
     min_boundary_clearance_um: float
 
+    def __post_init__(self):
+        if self.min_qubit_spacing_um < 0:
+            raise ValueError("min_qubit_spacing_um must be >= 0")
+        if self.min_frequency_separation_mhz < 0:
+            raise ValueError("min_frequency_separation_mhz must be >= 0")
+        if self.frequency_check_distance_um <= 0:
+            raise ValueError("frequency_check_distance_um must be > 0")
+        if self.min_boundary_clearance_um < 0:
+            raise ValueError("min_boundary_clearance_um must be >= 0")
+
 
 @dataclass
 class Qubit:

@@ -54,7 +54,7 @@ class TestOptimizationImprovement:
 
 
 class TestDeterminism:
-    def test_deterministic_with_seed(self):
+    def test_deterministic_behavior(self):
         constraints = _make_constraints()
         qubits = _make_qubits([(10.0, 10.0), (15.0, 10.0), (50.0, 50.0)])
         connections = _make_connections([("q0", "q1")], [1.0])
