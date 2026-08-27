@@ -1,4 +1,5 @@
 import json
+import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from models.schema import Qubit, Connection, ChipConstraints, Project
@@ -22,7 +23,6 @@ COLORS = {
     "intended": "#60a5fa",
 }
 
-
 def _make_constraints(**overrides):
     defaults = {
         "min_qubit_spacing_um": 10.0,
@@ -32,7 +32,6 @@ def _make_constraints(**overrides):
     }
     defaults.update(overrides)
     return ChipConstraints(**defaults)
-
 
 def _make_demo_dataset():
     qubits = [
@@ -53,7 +52,6 @@ def _make_demo_dataset():
     ]
     return qubits, connections
 
-
 def _make_blank_project():
     return Project(
         id="blank",
@@ -65,29 +63,17 @@ def _make_blank_project():
         connections=[],
     )
 
-
 def _get_project():
     return st.session_state.get("project")
-
 
 def _set_project(project):
     st.session_state["project"] = project
 
-
-def _next_qubit_id(project):
-    used_ids = {q.id for q in project.qubits}
-    index = 0
-    while True:
-        candidate = f"Q{index}"
-        if candidate not in used_ids:
-            return candidate
-        index += 1
-
-
 def _init_session_state():
     if "project" not in st.session_state:
         _set_project(_make_blank_project())
-
+    if "editor_version" not in st.session_state:
+        st.session_state["editor_version"] = 0
 
 def _apply_movements(qubits, movements):
     positions = {q.id: (q.x_um, q.y_um) for q in qubits}
@@ -97,7 +83,6 @@ def _apply_movements(qubits, movements):
         Qubit(q.id, positions[q.id][0], positions[q.id][1], q.frequency_mhz, q.movable)
         for q in qubits
     ]
-
 
 def _build_canvas(project):
     qubits = project.qubits
@@ -117,8 +102,11 @@ def _build_canvas(project):
 
     risk_results = build_risk_results(qubits, connections)
     for rr in risk_results:
-        q_a = next(q for q in qubits if q.id == rr.source_qubit_id)
-        q_b = next(q for q in qubits if q.id == rr.target_qubit_id)
+        q_a = next((q for q in qubits if q.id == rr.source_qubit_id), None)
+        q_b = next((q for q in qubits if q.id == rr.target_qubit_id), None)
+        
+        if not q_a or not q_b:
+            continue
 
         if rr.interaction_weight > 0.0:
             color = COLORS["intended"]
@@ -185,124 +173,18 @@ def _build_canvas(project):
             scaleratio=1,
         ),
         margin=dict(l=40, r=40, t=40, b=40),
-        height=500,
+        height=600,
     )
 
     return fig
 
-
-def _build_lqs_panel(project):
-    qubits = project.qubits
-    connections = project.connections
-
-    st.subheader("Metrics")
-    lqs = compute_lqs(qubits, connections)
-    st.metric("Layout Quality Score", f"{lqs:.1f} / 100")
-    
-    risk_results = build_risk_results(qubits, connections)
-    if not risk_results:
-        worst_pair_risk = 0.00
-    else:
-        worst_pair_risk = max(r.objective_penalty for r in risk_results)
-        
-    if worst_pair_risk > 0.65:
-        st.metric("Worst Pair Risk", f"{worst_pair_risk:.2f} 🔴")
-    else:
-        st.metric("Worst Pair Risk", f"{worst_pair_risk:.2f}")
-
-
-def _build_risk_panel(project):
-    qubits = project.qubits
-    connections = project.connections
-
-    st.subheader("Risk Panel")
-
-    risk_results = build_risk_results(qubits, connections)
-    if not risk_results:
-        st.write("No connections defined.")
-        return
-
-    for rr in risk_results:
-        if rr.interaction_weight > 0.0:
-            severity = "LOW"
-            color = COLORS["low_risk"]
-            icon = "✓"
-        else:
-            severity = rr.severity
-            if severity == "HIGH":
-                color = COLORS["high_risk"]
-                icon = "🔴"
-            elif severity == "MEDIUM":
-                color = COLORS["medium_risk"]
-                icon = "⚠"
-            else:
-                color = COLORS["low_risk"]
-                icon = "✓"
-
-        st.markdown(
-            f"<span style='color:{color}'>{icon} {rr.source_qubit_id}-{rr.target_qubit_id}</span> "
-            f"(penalty={rr.objective_penalty:.2f})",
-            unsafe_allow_html=True,
-        )
-
-
-def _build_drc_panel(project):
-    qubits = project.qubits
-    connections = project.connections
-    constraints = project.constraints
-    chip_width = project.chip_width_um
-    chip_height = project.chip_height_um
-
-    st.subheader("Q-DRC Warnings")
-    drc = validate_layout(qubits, constraints, connections, chip_width, chip_height)
-
-    if not drc.violations and not drc.warnings:
-        st.success("No violations or warnings.")
-    else:
-        for v in drc.violations:
-            st.error(f"**Violation:** {v.get('rule', 'unknown')} - {v.get('detail', '')}")
-        for w in drc.warnings:
-            st.warning(f"**Warning:** {w.get('rule', 'unknown')} - {w.get('detail', '')}")
-
-
-def _build_explainability_panel(project):
-    qubits = project.qubits
-    connections = project.connections
-
-    st.subheader("Risk Explainability")
-
-    risk_results = build_risk_results(qubits, connections)
-    if not risk_results:
-        st.write("No connections defined.")
-        return
-
-    options = [f"{rr.source_qubit_id}-{rr.target_qubit_id}" for rr in risk_results]
-    selected_pair = st.selectbox("Select a pair", options=options)
-
-    for rr in risk_results:
-        if f"{rr.source_qubit_id}-{rr.target_qubit_id}" == selected_pair:
-            explanation = explain_risk(rr)
-            st.write(f"**Severity:** {explanation['severity']}")
-            st.write(f"**Penalty:** {explanation['objective_penalty']:.4f}")
-            for reason in explanation["reasons"]:
-                st.write(f"- {reason}")
-            break
-
-
-def main():
-    _init_session_state()
-    project = _get_project()
-
-    st.title("Q-Layout")
-    st.caption(f"Project: {project.name}")
-
-    with st.sidebar:
-        st.header("Project")
-
-        if st.button("Load Demo Chip"):
+def render_design_tab(project):
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Load Demo Chip", use_container_width=True):
             qubits, connections = _make_demo_dataset()
             constraints = _make_constraints()
-            project = Project(
+            p = Project(
                 id="demo",
                 name="Demo Chip",
                 chip_width_um=CHIP_WIDTH,
@@ -311,193 +193,268 @@ def main():
                 qubits=qubits,
                 connections=connections,
             )
-            _set_project(project)
+            _set_project(p)
+            st.session_state["editor_version"] += 1
             st.rerun()
 
-        if st.button("Create Blank Project"):
+    with col2:
+        if st.button("Create Blank Project", use_container_width=True):
             _set_project(_make_blank_project())
+            st.session_state["editor_version"] += 1
             st.rerun()
 
-        with st.expander("Configure Chip", expanded=True):
-            project.name = st.text_input("Project name", value=project.name)
-            project.chip_width_um = st.number_input(
-                "Chip width (um)",
-                min_value=10.0,
-                value=float(project.chip_width_um),
-                step=1.0,
-            )
-            project.chip_height_um = st.number_input(
-                "Chip height (um)",
-                min_value=10.0,
-                value=float(project.chip_height_um),
-                step=1.0,
-            )
-            project.constraints.min_qubit_spacing_um = st.number_input(
-                "Min qubit spacing (um)",
-                min_value=0.1,
-                value=float(project.constraints.min_qubit_spacing_um),
-                step=0.5,
-            )
-            project.constraints.min_frequency_separation_mhz = st.number_input(
-                "Min frequency separation (MHz)",
-                min_value=1.0,
-                value=float(project.constraints.min_frequency_separation_mhz),
-                step=1.0,
-            )
-            project.constraints.frequency_check_distance_um = st.number_input(
-                "Frequency check distance (um)",
-                min_value=0.1,
-                value=float(project.constraints.frequency_check_distance_um),
-                step=0.5,
-            )
-            project.constraints.min_boundary_clearance_um = st.number_input(
-                "Min boundary clearance (um)",
-                min_value=0.0,
-                value=float(project.constraints.min_boundary_clearance_um),
-                step=0.5,
-            )
+    st.divider()
+    
+    st.markdown("### Qubits")
+    df_qubits = pd.DataFrame([{
+        "id": q.id, "x_um": q.x_um, "y_um": q.y_um, "frequency_mhz": q.frequency_mhz, "movable": q.movable
+    } for q in project.qubits])
+    if df_qubits.empty:
+        df_qubits = pd.DataFrame(columns=["id", "x_um", "y_um", "frequency_mhz", "movable"])
+
+    edited_df_qubits = st.data_editor(
+        df_qubits,
+        num_rows="dynamic",
+        key=f"qubit_editor_{st.session_state.editor_version}",
+        use_container_width=True,
+        column_config={
+            "id": st.column_config.TextColumn("Qubit ID", required=True),
+            "x_um": st.column_config.NumberColumn("X (um)", required=True),
+            "y_um": st.column_config.NumberColumn("Y (um)", required=True),
+            "frequency_mhz": st.column_config.NumberColumn("Freq (MHz)", required=True),
+            "movable": st.column_config.CheckboxColumn("Movable", default=True),
+        }
+    )
+
+    st.markdown("### Connections")
+    df_conns = pd.DataFrame([{
+        "source": c.source_qubit_id, "target": c.target_qubit_id, 
+        "interaction_weight": c.interaction_weight, "gate_count": c.gate_count
+    } for c in project.connections])
+    if df_conns.empty:
+        df_conns = pd.DataFrame(columns=["source", "target", "interaction_weight", "gate_count"])
+
+    edited_df_conns = st.data_editor(
+        df_conns,
+        num_rows="dynamic",
+        key=f"conn_editor_{st.session_state.editor_version}",
+        use_container_width=True,
+        column_config={
+            "source": st.column_config.TextColumn("Source", required=True),
+            "target": st.column_config.TextColumn("Target", required=True),
+            "interaction_weight": st.column_config.NumberColumn("Interaction Weight", min_value=0.0, max_value=1.0, required=True),
+            "gate_count": st.column_config.NumberColumn("Gate Count", min_value=1, step=1, required=True),
+        }
+    )
+
+    new_qubits = []
+    qubit_errors = []
+    seen_q_ids = set()
+    
+    for i, row in edited_df_qubits.iterrows():
+        qid = str(row.get("id", "")).strip()
+        if qid == "nan" or qid == "None": qid = ""
+        
+        try:
+            x = float(row.get("x_um", 0.0))
+            if pd.isna(x): x = 0.0
+            y = float(row.get("y_um", 0.0))
+            if pd.isna(y): y = 0.0
+            f = float(row.get("frequency_mhz", 5000.0))
+            if pd.isna(f): f = 5000.0
+            mov = bool(row.get("movable", True))
+        except (ValueError, TypeError):
+            qubit_errors.append(f"Row {i}: Numeric conversion error.")
+            continue
+            
+        if not qid:
+            qubit_errors.append(f"Row {i}: Qubit ID cannot be empty.")
+            continue
+        if qid in seen_q_ids:
+            qubit_errors.append(f"Row {i}: Duplicate Qubit ID '{qid}'.")
+            continue
+        seen_q_ids.add(qid)
+        
+        try:
+            q = Qubit(id=qid, x_um=x, y_um=y, frequency_mhz=f, movable=mov)
+            new_qubits.append(q)
+        except ValueError as e:
+            qubit_errors.append(f"Row {i} ({qid}): {e}")
+
+    new_conns = []
+    conn_errors = []
+    seen_pairs = set()
+    
+    for i, row in edited_df_conns.iterrows():
+        src = str(row.get("source", "")).strip()
+        if src == "nan" or src == "None": src = ""
+        tgt = str(row.get("target", "")).strip()
+        if tgt == "nan" or tgt == "None": tgt = ""
+        
+        try:
+            w = float(row.get("interaction_weight", 0.5))
+            if pd.isna(w): w = 0.5
+            gc = int(row.get("gate_count", 1))
+            if pd.isna(gc): gc = 1
+        except (ValueError, TypeError):
+            conn_errors.append(f"Row {i}: Numeric conversion error.")
+            continue
+            
+        if not src or not tgt:
+            conn_errors.append(f"Row {i}: Source and Target must not be empty.")
+            continue
+        if src not in seen_q_ids or tgt not in seen_q_ids:
+            conn_errors.append(f"Row {i}: Connection references unknown qubit IDs ({src}, {tgt}).")
+            continue
+        if src == tgt:
+            conn_errors.append(f"Row {i}: A qubit cannot connect to itself ({src}).")
+            continue
+            
+        pair = frozenset([src, tgt])
+        if pair in seen_pairs:
+            conn_errors.append(f"Row {i}: Duplicate connection between {src} and {tgt}.")
+            continue
+        seen_pairs.add(pair)
+        
+        try:
+            c = Connection(source_qubit_id=src, target_qubit_id=tgt, interaction_weight=w, gate_count=gc)
+            new_conns.append(c)
+        except ValueError as e:
+            conn_errors.append(f"Row {i}: {e}")
+
+    for e in qubit_errors:
+        st.error(e)
+    for e in conn_errors:
+        st.error(e)
+        
+    if not qubit_errors and not conn_errors:
+        project.qubits = new_qubits
+        project.connections = new_conns
+
+    st.divider()
+
+    st.markdown("### Chip Constraints")
+    c1, c2 = st.columns(2)
+    new_name = st.text_input("Project name", value=project.name)
+    new_w = c1.number_input("Chip width (um)", min_value=10.0, value=float(project.chip_width_um), step=1.0)
+    new_h = c2.number_input("Chip height (um)", min_value=10.0, value=float(project.chip_height_um), step=1.0)
+    
+    cc1, cc2 = st.columns(2)
+    min_q = cc1.number_input("Min qubit spacing (um)", value=float(project.constraints.min_qubit_spacing_um), step=0.5)
+    min_f = cc2.number_input("Min frequency separation (MHz)", value=float(project.constraints.min_frequency_separation_mhz), step=1.0)
+    f_dist = cc1.number_input("Frequency check distance (um)", value=float(project.constraints.frequency_check_distance_um), step=0.5)
+    min_b = cc2.number_input("Min boundary clearance (um)", value=float(project.constraints.min_boundary_clearance_um), step=0.5)
+
+    constraints_error = None
+    try:
+        new_c = ChipConstraints(
+            min_qubit_spacing_um=min_q,
+            min_frequency_separation_mhz=min_f,
+            frequency_check_distance_um=f_dist,
+            min_boundary_clearance_um=min_b
+        )
+    except ValueError as e:
+        constraints_error = str(e)
+        
+    if constraints_error:
+        st.error(f"Constraints Error: {constraints_error}")
+    else:
+        project.name = new_name
+        project.chip_width_um = new_w
+        project.chip_height_um = new_h
+        project.constraints = new_c
+        
+    _set_project(project)
+
+    st.divider()
+
+    st.markdown("### 📍 Place Qubit on Canvas")
+    q_ids = [q.id for q in project.qubits]
+    if not q_ids:
+        st.info("Create a qubit first to place it.")
+    else:
+        col_q, col_x, col_y, col_btn = st.columns([2, 1, 1, 1])
+        place_q_id = col_q.selectbox("Qubit to place", options=q_ids)
+        new_x = col_x.number_input("Target X", min_value=0.0, max_value=float(project.chip_width_um), value=10.0, step=1.0)
+        new_y = col_y.number_input("Target Y", min_value=0.0, max_value=float(project.chip_height_um), value=10.0, step=1.0)
+        
+        if col_btn.button("Move Qubit", use_container_width=True):
+            for q in project.qubits:
+                if q.id == place_q_id:
+                    q.x_um = new_x
+                    q.y_um = new_y
             _set_project(project)
+            st.session_state["editor_version"] += 1
+            st.rerun()
 
-        with st.expander("Qubit Manager", expanded=True):
-            if not project.qubits:
-                st.info("No qubits yet. Add a few to begin layout analysis.")
+    st.divider()
 
-            with st.form("add_qubit_form", clear_on_submit=True):
-                qubit_id = st.text_input("Qubit ID", value=_next_qubit_id(project))
-                x_um = st.number_input("X (um)", min_value=0.0, value=10.0, step=1.0)
-                y_um = st.number_input("Y (um)", min_value=0.0, value=10.0, step=1.0)
-                frequency_mhz = st.number_input("Frequency (MHz)", min_value=0.0, value=5000.0, step=10.0)
-                movable = st.checkbox("Movable", value=True)
-                submitted = st.form_submit_button("Add Qubit")
-
-            if submitted:
-                clean_id = qubit_id.strip() or _next_qubit_id(project)
-                if any(existing.id == clean_id for existing in project.qubits):
-                    st.warning(f"Qubit '{clean_id}' already exists.")
+    st.markdown("### Selected Qubit")
+    if not project.qubits:
+        st.info("No qubits available.")
+    else:
+        selected_q_id = st.selectbox("Inspect Qubit", options=q_ids, key="inspect_q_id")
+        if selected_q_id:
+            q = next((q for q in project.qubits if q.id == selected_q_id), None)
+            if q:
+                st.write(f"**ID:** {q.id} | **Position:** ({q.x_um:.1f}, {q.y_um:.1f}) | **Frequency:** {q.frequency_mhz:.0f} MHz | **Movable:** {q.movable}")
+                
+                risk_results = build_risk_results(project.qubits, project.connections)
+                q_risks = [r for r in risk_results if r.source_qubit_id == q.id or r.target_qubit_id == q.id]
+                
+                if q_risks:
+                    nearest = min(q_risks, key=lambda r: r.distance_um)
+                    worst = max(q_risks, key=lambda r: r.objective_penalty)
+                    nearest_other = nearest.target_qubit_id if nearest.source_qubit_id == q.id else nearest.source_qubit_id
+                    worst_other = worst.target_qubit_id if worst.source_qubit_id == q.id else worst.source_qubit_id
+                    
+                    st.write(f"- **Nearest qubit:** {nearest_other} ({nearest.distance_um:.2f} um)")
+                    st.write(f"- **Worst interaction:** {worst_other} (Penalty: {worst.objective_penalty:.3f}, Severity: {worst.severity})")
                 else:
-                    project.qubits.append(
-                        Qubit(
-                            id=clean_id,
-                            x_um=float(x_um),
-                            y_um=float(y_um),
-                            frequency_mhz=float(frequency_mhz),
-                            movable=movable,
-                        )
-                    )
-                    _set_project(project)
-                    st.success(f"Added {clean_id}.")
+                    st.write("No risk results involving this qubit (requires at least 2 connected/interacting qubits).")
 
-            if project.qubits:
-                st.markdown("**Current Qubits**")
-                for q in project.qubits:
-                    cols = st.columns([3, 1])
-                    cols[0].write(f"{q.id}: ({q.x_um:.1f}, {q.y_um:.1f}) @ {q.frequency_mhz:.0f} MHz")
-                    if cols[1].button("Remove", key=f"remove_qubit_{q.id}"):
-                        project.qubits = [existing for existing in project.qubits if existing.id != q.id]
-                        project.connections = [
-                            conn for conn in project.connections
-                            if conn.source_qubit_id != q.id and conn.target_qubit_id != q.id
-                        ]
-                        _set_project(project)
-                        st.rerun()
+    st.divider()
+    st.subheader("Export")
+    if st.button("Export Layout"):
+        layout_data = {
+            "id": project.id,
+            "name": project.name,
+            "chip_width_um": project.chip_width_um,
+            "chip_height_um": project.chip_height_um,
+            "constraints": {
+                "min_qubit_spacing_um": project.constraints.min_qubit_spacing_um,
+                "min_frequency_separation_mhz": project.constraints.min_frequency_separation_mhz,
+                "frequency_check_distance_um": project.constraints.frequency_check_distance_um,
+                "min_boundary_clearance_um": project.constraints.min_boundary_clearance_um,
+            },
+            "qubits": [
+                {
+                    "id": q.id,
+                    "x_um": q.x_um,
+                    "y_um": q.y_um,
+                    "frequency_mhz": q.frequency_mhz,
+                    "movable": q.movable,
+                }
+                for q in project.qubits
+            ],
+            "connections": [
+                {
+                    "source_qubit_id": c.source_qubit_id,
+                    "target_qubit_id": c.target_qubit_id,
+                    "interaction_weight": c.interaction_weight,
+                    "gate_count": c.gate_count,
+                }
+                for c in project.connections
+            ],
+        }
+        st.download_button(
+            label="Download JSON",
+            data=json.dumps(layout_data, indent=2),
+            file_name="layout.json",
+            mime="application/json",
+        )
 
-        with st.expander("Connection Builder", expanded=True):
-            qubit_ids = [q.id for q in project.qubits]
-            if len(qubit_ids) < 2:
-                st.info("Add at least two qubits to create a connection.")
-            else:
-                with st.form("add_connection_form", clear_on_submit=True):
-                    source_qubit_id = st.selectbox("Source Qubit", options=qubit_ids)
-                    target_qubit_id = st.selectbox(
-                        "Target Qubit",
-                        options=[q_id for q_id in qubit_ids if q_id != source_qubit_id],
-                    )
-                    interaction_weight = st.slider("Interaction weight (I_ij)", 0.0, 1.0, 0.5, 0.01)
-                    gate_count = st.number_input("Gate count", min_value=1, value=1, step=1)
-                    submitted = st.form_submit_button("Add Connection")
-
-                if submitted:
-                    if source_qubit_id == target_qubit_id:
-                        st.warning("A qubit cannot be connected to itself.")
-                    else:
-                        pair_exists = any(
-                            (
-                                (conn.source_qubit_id == source_qubit_id and conn.target_qubit_id == target_qubit_id)
-                                or (conn.source_qubit_id == target_qubit_id and conn.target_qubit_id == source_qubit_id)
-                            )
-                            for conn in project.connections
-                        )
-                        if pair_exists:
-                            st.warning("This connection already exists.")
-                        else:
-                            project.connections.append(
-                                Connection(
-                                    source_qubit_id=source_qubit_id,
-                                    target_qubit_id=target_qubit_id,
-                                    interaction_weight=float(interaction_weight),
-                                    gate_count=int(gate_count),
-                                )
-                            )
-                            _set_project(project)
-                            st.success(f"Connected {source_qubit_id} to {target_qubit_id}.")
-
-            if project.connections:
-                st.markdown("**Current Connections**")
-                for conn in project.connections:
-                    label = f"{conn.source_qubit_id} → {conn.target_qubit_id} (I={conn.interaction_weight:.2f})"
-                    cols = st.columns([4, 1])
-                    cols[0].write(label)
-                    if cols[1].button("Remove", key=f"remove_conn_{conn.source_qubit_id}_{conn.target_qubit_id}"):
-                        project.connections = [
-                            existing for existing in project.connections
-                            if not (
-                                existing.source_qubit_id == conn.source_qubit_id
-                                and existing.target_qubit_id == conn.target_qubit_id
-                            )
-                        ]
-                        _set_project(project)
-                        st.rerun()
-
-        st.subheader("Export")
-        if st.button("Export Layout"):
-            layout_data = {
-                "id": project.id,
-                "name": project.name,
-                "chip_width_um": project.chip_width_um,
-                "chip_height_um": project.chip_height_um,
-                "constraints": {
-                    "min_qubit_spacing_um": project.constraints.min_qubit_spacing_um,
-                    "min_frequency_separation_mhz": project.constraints.min_frequency_separation_mhz,
-                    "frequency_check_distance_um": project.constraints.frequency_check_distance_um,
-                    "min_boundary_clearance_um": project.constraints.min_boundary_clearance_um,
-                },
-                "qubits": [
-                    {
-                        "id": q.id,
-                        "x_um": q.x_um,
-                        "y_um": q.y_um,
-                        "frequency_mhz": q.frequency_mhz,
-                        "movable": q.movable,
-                    }
-                    for q in project.qubits
-                ],
-                "connections": [
-                    {
-                        "source_qubit_id": c.source_qubit_id,
-                        "target_qubit_id": c.target_qubit_id,
-                        "interaction_weight": c.interaction_weight,
-                        "gate_count": c.gate_count,
-                    }
-                    for c in project.connections
-                ],
-            }
-            st.download_button(
-                label="Download JSON",
-                data=json.dumps(layout_data, indent=2),
-                file_name="layout.json",
-                mime="application/json",
-            )
-
+def render_analyze_tab(project):
     col_canvas, col_info = st.columns([3, 1])
 
     with col_canvas:
@@ -505,18 +462,28 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
 
     with col_info:
-        _build_lqs_panel(project)
-        _build_drc_panel(project)
-        _build_explainability_panel(project)
-
-    st.divider()
-    col_lqs, col_drc, col_opt = st.columns([1, 1, 1])
-
-    with col_lqs:
+        st.subheader("Metrics")
         lqs = compute_lqs(project.qubits, project.connections)
-        st.metric("LQS", f"{lqs:.1f}")
+        st.metric("Layout Quality Score", f"{lqs:.1f} / 100")
+        
+        risk_results = build_risk_results(project.qubits, project.connections)
+        if not risk_results:
+            st.metric("Worst Pair Risk", "N/A")
+        else:
+            worst_risk = max(risk_results, key=lambda r: r.objective_penalty)
+            penalty = worst_risk.objective_penalty
+            pair_str = f"{worst_risk.source_qubit_id} <-> {worst_risk.target_qubit_id}"
+            
+            if penalty > 0.65:
+                st.metric("Worst Pair Risk", f"{penalty:.3f} (HIGH)")
+                st.caption(f"**High Risk Pair:** {pair_str}")
+            else:
+                st.metric("Worst Pair Risk", f"{penalty:.3f}")
+                st.caption(f"Highest-risk pair: {pair_str}")
 
-    with col_drc:
+        st.divider()
+
+        st.subheader("Q-DRC Summary")
         drc = validate_layout(
             project.qubits,
             project.constraints,
@@ -524,11 +491,42 @@ def main():
             project.chip_width_um,
             project.chip_height_um,
         )
-        drc_count = len(drc.violations) + len(drc.warnings)
-        st.metric("DRC Issues", drc_count)
+        if not drc.violations and not drc.warnings:
+            st.success("PASS: No violations or warnings.")
+        else:
+            if drc.violations:
+                st.error(f"FAIL: {len(drc.violations)} violations.")
+            if drc.warnings:
+                st.warning(f"WARN: {len(drc.warnings)} warnings.")
 
-    with col_opt:
-        if st.button("Auto-Optimize", type="primary"):
+    st.divider()
+    st.subheader("Risk Explanation")
+    
+    if not risk_results:
+        st.info("No connections defined to analyze.")
+    else:
+        options = [f"{rr.source_qubit_id} <-> {rr.target_qubit_id}" for rr in risk_results]
+        selected_pair = st.selectbox("Select a pair to inspect", options=options)
+
+        for rr in risk_results:
+            if f"{rr.source_qubit_id} <-> {rr.target_qubit_id}" == selected_pair:
+                explanation = explain_risk(rr)
+                
+                c1, c2 = st.columns(2)
+                c1.write(f"**Severity:** {explanation['severity']}")
+                c2.write(f"**Penalty:** {explanation['objective_penalty']:.4f}")
+                
+                st.markdown("**Reasons:**")
+                for reason in explanation["reasons"]:
+                    st.markdown(f"- {reason}")
+                break
+
+def render_optimize_tab(project):
+    st.subheader("Optimizer Control")
+    st.write("Run the deterministic 8-direction hill-climbing optimizer to improve the Layout Quality Score while respecting Q-DRC constraints.")
+
+    if st.button("Auto-Optimize", type="primary"):
+        with st.spinner("Optimizing layout..."):
             result = optimize_layout(
                 project.qubits,
                 project.connections,
@@ -540,13 +538,48 @@ def main():
             new_qubits = _apply_movements(project.qubits, result.movements)
             project.qubits = new_qubits
             _set_project(project)
+            st.session_state["last_optimization_result"] = result
+            st.session_state["editor_version"] += 1
+            st.rerun()
 
-            st.success(
-                f"Optimization complete!\n"
-                f"Before LQS: {result.lqs_before:.1f} → After LQS: {result.lqs_after:.1f}\n"
-                f"Iterations: {result.iterations} | Stopped: {result.stopped_reason}"
-            )
+    st.divider()
+    
+    if "last_optimization_result" in st.session_state:
+        st.subheader("Optimization Results")
+        result = st.session_state["last_optimization_result"]
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Before", f"LQS = {result.lqs_before:.1f}")
+        c2.metric("After", f"LQS = {result.lqs_after:.1f}")
+        
+        improvement = result.lqs_after - result.lqs_before
+        c3.metric("Improvement", f"{improvement:.1f}")
+        
+        st.info(f"**Iterations:** {result.iterations} | **Stopped:** {result.stopped_reason}")
+    else:
+        st.info("Run the optimizer to see results.")
 
+def main():
+    _init_session_state()
+    project = _get_project()
+
+    st.title("Q-Layout")
+    st.caption(f"Project: {project.name}")
+
+    tab_design, tab_analyze, tab_optimize = st.tabs([
+        "Design",
+        "Analyze",
+        "Optimize"
+    ])
+
+    with tab_design:
+        render_design_tab(project)
+
+    with tab_analyze:
+        render_analyze_tab(project)
+
+    with tab_optimize:
+        render_optimize_tab(project)
 
 if __name__ == "__main__":
     main()
