@@ -74,6 +74,10 @@ def _init_session_state():
         _set_project(_make_blank_project())
     if "editor_version" not in st.session_state:
         st.session_state["editor_version"] = 0
+    if "candidate_project" not in st.session_state:
+        st.session_state["candidate_project"] = None
+    if "last_optimization_result" not in st.session_state:
+        st.session_state["last_optimization_result"] = None
 
 def _apply_movements(qubits, movements):
     positions = {q.id: (q.x_um, q.y_um) for q in qubits}
@@ -597,17 +601,27 @@ def render_optimize_tab(project):
             )
 
             new_qubits = _apply_movements(project.qubits, result.movements)
-            project.qubits = new_qubits
-            _set_project(project)
+            
+            candidate = Project(
+                id=project.id,
+                name=project.name,
+                chip_width_um=project.chip_width_um,
+                chip_height_um=project.chip_height_um,
+                constraints=project.constraints,
+                qubits=new_qubits,
+                connections=project.connections,
+            )
+            st.session_state["candidate_project"] = candidate
             st.session_state["last_optimization_result"] = result
-            st.session_state["editor_version"] += 1
             st.rerun()
 
     st.divider()
     
-    if "last_optimization_result" in st.session_state:
+    candidate = st.session_state.get("candidate_project")
+    result = st.session_state.get("last_optimization_result")
+    
+    if candidate and result:
         st.subheader("Optimization Results")
-        result = st.session_state["last_optimization_result"]
         
         if result.movements:
             x_vals = [0] + [m["iteration"] for m in result.movements]
@@ -627,16 +641,40 @@ def render_optimize_tab(project):
             )
             st.plotly_chart(fig, use_container_width=True)
             
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Initial LQS", f"{result.lqs_before:.1f}")
-        c2.metric("Final LQS", f"{result.lqs_after:.1f}")
+        c1, c2 = st.columns(2)
         
-        improvement = result.lqs_after - result.lqs_before
-        c3.metric("Improvement", f"+{improvement:.1f}" if improvement > 0 else f"{improvement:.1f}")
+        risk_before = build_risk_results(project.qubits, project.connections)
+        worst_before = max((r.objective_penalty for r in risk_before), default=None)
+        worst_before_str = f"{worst_before:.3f}" if worst_before is not None else "N/A"
+        
+        c1.markdown("#### BEFORE")
+        c1.metric("LQS", f"{result.lqs_before:.1f}")
+        c1.metric("Worst Risk", worst_before_str)
+        
+        risk_after = build_risk_results(candidate.qubits, candidate.connections)
+        worst_after = max((r.objective_penalty for r in risk_after), default=None)
+        worst_after_str = f"{worst_after:.3f}" if worst_after is not None else "N/A"
+        
+        c2.markdown("#### AFTER")
+        c2.metric("LQS", f"{result.lqs_after:.1f}", delta=f"{result.lqs_after - result.lqs_before:.1f}")
+        c2.metric("Worst Risk", worst_after_str)
         
         st.info(f"**Iterations:** {result.iterations} | **Stopped:** {result.stopped_reason}")
+        
+        c_apply, c_revert = st.columns(2)
+        if c_apply.button("✅ Apply Candidate Layout", type="primary", use_container_width=True):
+            _set_project(candidate)
+            st.session_state["candidate_project"] = None
+            st.session_state["last_optimization_result"] = None
+            st.session_state["editor_version"] += 1
+            st.rerun()
+            
+        if c_revert.button("❌ Revert", use_container_width=True):
+            st.session_state["candidate_project"] = None
+            st.session_state["last_optimization_result"] = None
+            st.rerun()
     else:
-        st.info("Run the optimizer to see results.")
+        st.info("No optimization candidate yet.\n\nRun Auto-Optimize to generate a candidate layout.")
 
 def main():
     _init_session_state()
