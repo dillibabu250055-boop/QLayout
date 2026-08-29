@@ -2,7 +2,9 @@
 
 **Built for PEC Hacks 4.0 by Team Quantum Pioneers**
 
-Q-Layout is a physics-informed pre-simulation EDA copilot for superconducting quantum-chip layouts. It bridges architectural design and expensive electromagnetic validation by coupling spatial proximity analysis with spectral frequency checks in real time.
+Q-Layout reduces guesswork during early-stage quantum-chip layout exploration. It bridges architectural design and expensive electromagnetic validation by coupling spatial proximity analysis with spectral frequency checks in real time.
+
+Q-Layout utilizes a physics-informed, normalized inverse-cubic proxy for spatial coupling risk, designed to rapidly flag architectural bottlenecks prior to high-fidelity electromagnetic simulation.
 
 ---
 

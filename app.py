@@ -74,6 +74,8 @@ def _init_session_state():
         _set_project(_make_blank_project())
     if "editor_version" not in st.session_state:
         st.session_state["editor_version"] = 0
+    if "candidate_project" not in st.session_state:
+        st.session_state["candidate_project"] = None
     if "last_optimization_result" not in st.session_state:
         st.session_state["last_optimization_result"] = None
 
@@ -423,42 +425,6 @@ def render_design_tab(project):
             st.rerun()
 
     st.divider()
-
-    st.markdown("### Qubit Inspector")
-    if not project.qubits:
-        st.info("No qubits available.\n\nAdd a qubit in the Design tab to inspect it.")
-    else:
-        selected_q_id = st.selectbox("Select Qubit", options=q_ids, key="inspect_q_id")
-        if selected_q_id:
-            q = next((q for q in project.qubits if q.id == selected_q_id), None)
-            if q:
-                st.markdown(f"**QUBIT INSPECTOR — {q.id}**")
-                
-                import math
-                nearest_id = None
-                nearest_dist = float('inf')
-                for other_q in project.qubits:
-                    if other_q.id != q.id:
-                        dist = math.hypot(q.x_um - other_q.x_um, q.y_um - other_q.y_um)
-                        if dist < nearest_dist:
-                            nearest_dist = dist
-                            nearest_id = other_q.id
-                
-                nearest_str = f"{nearest_id}\nDistance: {nearest_dist:.1f} um" if nearest_id else "N/A — only one qubit"
-                
-                risk_results = build_risk_results(project.qubits, project.connections)
-                q_risks = [r for r in risk_results if r.source_qubit_id == q.id or r.target_qubit_id == q.id]
-                
-                if q_risks:
-                    worst = max(q_risks, key=lambda r: r.objective_penalty)
-                    icon = "🔴" if worst.severity == "HIGH" else "🟡" if worst.severity == "MEDIUM" else "🟢"
-                    worst_str = f"{icon} {worst.severity}\nPenalty: {worst.objective_penalty:.3f}\nPair: {worst.source_qubit_id} ↔ {worst.target_qubit_id}"
-                else:
-                    worst_str = "N/A"
-                    
-                st.info(f"**Position**\nX: {q.x_um:.1f} µm    Y: {q.y_um:.1f} µm\n\n**Frequency**\n{q.frequency_mhz:,.0f} MHz\n\n**Nearest Neighbor**\n{nearest_str}\n\n**Worst Pair Risk**\n{worst_str}")
-
-    st.divider()
     st.subheader("Export")
     if st.button("Export Layout"):
         layout_data = {
@@ -580,7 +546,40 @@ def render_analyze_tab(project):
                     st.write(f"- ⚠ {w}")
 
     st.divider()
-    st.subheader("Risk Explainability")
+    st.markdown("### 🔍 Qubit Inspector")
+    if not project.qubits:
+        st.info("No qubits available.\n\nAdd a qubit in the Design tab to inspect it.")
+    else:
+        q_ids = [q.id for q in project.qubits]
+        selected_q_id = st.selectbox("Select Qubit", options=q_ids, key="inspect_q_id_analyze")
+        if selected_q_id:
+            q = next((q for q in project.qubits if q.id == selected_q_id), None)
+            if q:
+                import math
+                nearest_id = None
+                nearest_dist = float('inf')
+                for other_q in project.qubits:
+                    if other_q.id != q.id:
+                        dist = math.hypot(q.x_um - other_q.x_um, q.y_um - other_q.y_um)
+                        if dist < nearest_dist:
+                            nearest_dist = dist
+                            nearest_id = other_q.id
+                
+                nearest_str = f"{nearest_id}\nDistance: {nearest_dist:.1f} um" if nearest_id else "N/A — only one qubit"
+                
+                q_risks = [r for r in risk_results if r.source_qubit_id == q.id or r.target_qubit_id == q.id]
+                
+                if q_risks:
+                    worst = max(q_risks, key=lambda r: r.objective_penalty)
+                    icon = "🔴" if worst.severity == "HIGH" else "🟡" if worst.severity == "MEDIUM" else "🟢"
+                    worst_str = f"{icon} {worst.severity}\nPenalty: {worst.objective_penalty:.3f}\nPair: {worst.source_qubit_id} ↔ {worst.target_qubit_id}"
+                else:
+                    worst_str = "N/A"
+                    
+                st.info(f"**QUBIT INSPECTOR — {q.id}**\n\n**Position**\nX: {q.x_um:.1f} µm    Y: {q.y_um:.1f} µm\n\n**Frequency**\n{q.frequency_mhz:,.0f} MHz\n\n**Nearest Neighbor**\n{nearest_str}\n\n**Worst Pair Risk**\n{worst_str}")
+
+    st.divider()
+    st.subheader("⚠ Pair Risk Analysis")
     
     if not risk_results:
         st.info("Not enough qubits to analyze risk.")
@@ -613,7 +612,7 @@ def render_analyze_tab(project):
                     break
 
 def render_optimize_tab(project):
-    st.subheader("Optimizer Control")
+    st.subheader("⚡ Automatic Layout Optimization")
     st.write("Run the deterministic 8-direction hill-climbing optimizer to improve the Layout Quality Score while respecting Q-DRC constraints.")
 
     if st.button("Auto-Optimize", type="primary"):
@@ -627,17 +626,35 @@ def render_optimize_tab(project):
             )
 
             new_qubits = _apply_movements(project.qubits, result.movements)
-            project.qubits = new_qubits
-            _set_project(project)
+            
+            candidate = Project(
+                id=project.id,
+                name=project.name,
+                chip_width_um=project.chip_width_um,
+                chip_height_um=project.chip_height_um,
+                constraints=project.constraints,
+                qubits=new_qubits,
+                connections=project.connections,
+            )
+            st.session_state["candidate_project"] = candidate
             st.session_state["last_optimization_result"] = result
-            st.session_state["editor_version"] += 1
             st.rerun()
 
     st.divider()
     
-    if "last_optimization_result" in st.session_state and st.session_state["last_optimization_result"]:
-        result = st.session_state["last_optimization_result"]
+    candidate = st.session_state.get("candidate_project")
+    result = st.session_state.get("last_optimization_result")
+    
+    if candidate and result:
+        st.subheader("Optimization Result")
         
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Before LQS", f"{result.lqs_before:.1f}")
+        c2.metric("After LQS", f"{result.lqs_after:.1f}")
+        improvement = result.lqs_after - result.lqs_before
+        c3.metric("Improvement", f"+{improvement:.1f}" if improvement > 0 else f"{improvement:.1f}")
+        
+        st.markdown("### 📈 LQS Convergence")
         if result.movements:
             x_vals = [0] + [m["iteration"] for m in result.movements]
             y_vals = [result.lqs_before] + [m["lqs_after"] for m in result.movements]
@@ -645,36 +662,49 @@ def render_optimize_tab(project):
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines+markers', line=dict(color=COLORS['intended'])))
             fig.update_layout(
-                title="Optimization Convergence",
                 xaxis_title="Iteration",
                 yaxis_title="LQS",
                 paper_bgcolor=COLORS["bg"],
                 plot_bgcolor=COLORS["bg"],
                 font=dict(color=COLORS["text"]),
-                margin=dict(l=20, r=20, t=40, b=20),
+                margin=dict(l=20, r=20, t=20, b=20),
                 height=300
             )
             st.plotly_chart(fig, use_container_width=True)
             
-        st.subheader("Optimization Complete")
+        st.subheader("✅ Optimization Complete")
         
         reason_map = {
-            "patience_exhausted": "No further LQS-improving legal moves found",
-            "no_movable_qubits": "No movable qubits were available",
-            "max_iterations": "Maximum optimization iterations reached"
+            "patience_exhausted": "No further LQS-improving legal moves found.",
+            "no_movable_qubits": "No movable qubits were available.",
+            "max_iterations": "Maximum optimization iterations reached.",
+            "no_improvement": "No further LQS improvement was found.",
+            "already_optimal": "Layout was already optimal under the current constraints."
         }
         human_reason = reason_map.get(result.stopped_reason, f"Optimization stopped: {result.stopped_reason}")
         
-        improvement = result.lqs_after - result.lqs_before
-        
-        st.info(f"**🚀 OPTIMIZATION COMPLETE**\n\n"
-                f"**Starting LQS:** {result.lqs_before:.1f}\n\n"
+        st.info(f"**Starting LQS:** {result.lqs_before:.1f}\n\n"
                 f"**Final LQS:** {result.lqs_after:.1f}\n\n"
                 f"**Improvement:** +{improvement:.1f} \n\n"
-                f"**Total Iterations:** {result.iterations}\n\n"
-                f"**Stopped Because:**\n✓ {human_reason}")
+                f"**Iterations:** {result.iterations}\n\n"
+                f"**Stopped Reason:** {human_reason}")
+                
+        st.divider()
+        st.markdown("### Review Candidate")
+        c_apply, c_discard = st.columns(2)
+        if c_apply.button("✅ Apply Candidate", type="primary", use_container_width=True):
+            _set_project(candidate)
+            st.session_state["candidate_project"] = None
+            st.session_state["last_optimization_result"] = None
+            st.session_state["editor_version"] += 1
+            st.rerun()
+            
+        if c_discard.button("❌ Discard", use_container_width=True):
+            st.session_state["candidate_project"] = None
+            st.session_state["last_optimization_result"] = None
+            st.rerun()
     else:
-        st.info("Run the optimizer to see results.")
+        st.info("Run Auto-Optimize to generate a candidate layout.")
 
 def main():
     _init_session_state()
