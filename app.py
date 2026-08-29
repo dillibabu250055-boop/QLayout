@@ -88,7 +88,7 @@ def _apply_movements(qubits, movements):
         for q in qubits
     ]
 
-def _build_canvas(project, show_intended=True, show_high=True, show_medium=True, show_low=False):
+def _build_canvas(project, show_intended=True, show_high=True, show_medium=True, show_low=False, selected_qubit_id=None):
     qubits = project.qubits
     connections = project.connections
     chip_width = project.chip_width_um
@@ -171,7 +171,20 @@ def _build_canvas(project, show_intended=True, show_high=True, show_medium=True,
         q_x = [q.x_um for q in qubits]
         q_y = [q.y_um for q in qubits]
         q_text = [
-            f"{q.id}<br>x={q.x_um:.1f}, y={q.y_um:.1f}<br>f={q.frequency_mhz:.0f} MHz"
+            f"{q.id}<br>x={q.x_um:.1f}, y={q.y_um:.1f}<br>f={q.frequency_mhz:.0f} MHz{' [SELECTED]' if q.id == selected_qubit_id else ''}"
+            for q in qubits
+        ]
+
+        marker_colors = [
+            "#38bdf8" if q.id == selected_qubit_id else COLORS["text"]
+            for q in qubits
+        ]
+        marker_sizes = [
+            22 if q.id == selected_qubit_id else 16
+            for q in qubits
+        ]
+        marker_lines = [
+            dict(width=3, color="#0284c7") if q.id == selected_qubit_id else dict(width=2, color=COLORS["bg"])
             for q in qubits
         ]
 
@@ -179,11 +192,20 @@ def _build_canvas(project, show_intended=True, show_high=True, show_medium=True,
             x=q_x,
             y=q_y,
             mode="markers+text",
-            marker=dict(size=16, color=COLORS["text"], line=dict(width=2, color=COLORS["bg"])),
+            marker=dict(
+                size=marker_sizes,
+                color=marker_colors,
+                line=dict(
+                    width=[3 if q.id == selected_qubit_id else 2 for q in qubits],
+                    color=["#0284c7" if q.id == selected_qubit_id else COLORS["bg"] for q in qubits]
+                )
+            ),
             text=[q.id for q in qubits],
+            customdata=[q.id for q in qubits],
             textposition="top center",
             hovertext=q_text,
             hoverinfo="text",
+            name="Qubits",
             showlegend=False,
         ))
 
@@ -191,6 +213,7 @@ def _build_canvas(project, show_intended=True, show_high=True, show_medium=True,
         paper_bgcolor=COLORS["bg"],
         plot_bgcolor=COLORS["bg"],
         font=dict(color=COLORS["text"]),
+        dragmode="select",
         xaxis=dict(
             range=[0, chip_width],
             showgrid=True,
@@ -580,15 +603,112 @@ def render_analyze_tab(project):
     
     st.divider()
 
-    st.markdown("### Risk Visibility Controls")
-    c1, c2, c3, c4 = st.columns(4)
-    show_intended = c1.checkbox("Intended", value=True)
-    show_high = c2.checkbox("High Risk", value=True)
-    show_medium = c3.checkbox("Medium Risk", value=True)
-    show_low = c4.checkbox("Low Risk", value=False)
+    valid_q_ids = [q.id for q in project.qubits]
+    if "selected_qubit_id" not in st.session_state or st.session_state["selected_qubit_id"] not in valid_q_ids:
+        st.session_state["selected_qubit_id"] = valid_q_ids[0] if valid_q_ids else None
+
+    ctrl_col1, ctrl_col2 = st.columns([1, 1])
+    with ctrl_col1:
+        st.markdown("### Risk Visibility Controls")
+        c1, c2, c3, c4 = st.columns(4)
+        show_intended = c1.checkbox("Intended", value=True)
+        show_high = c2.checkbox("High Risk", value=True)
+        show_medium = c3.checkbox("Medium Risk", value=True)
+        show_low = c4.checkbox("Low Risk", value=False)
+        
+    with ctrl_col2:
+        st.markdown("### Canvas Interaction Mode")
+        interaction_mode = st.radio(
+            "Interaction Mode",
+            ["✋ Select / Move Mode", "🔍 Inspect Mode"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="canvas_interaction_mode_radio"
+        )
+
+    active_qid = st.session_state.get("selected_qubit_id")
+    fig = _build_canvas(
+        project,
+        show_intended=show_intended,
+        show_high=show_high,
+        show_medium=show_medium,
+        show_low=show_low,
+        selected_qubit_id=active_qid,
+    )
     
-    fig = _build_canvas(project, show_intended, show_high, show_medium, show_low)
-    st.plotly_chart(fig, use_container_width=True)
+    canvas_events = st.plotly_chart(
+        fig,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode=["points", "box"],
+        key=f"chip_canvas_{st.session_state.editor_version}",
+    )
+    
+    # Process canvas interaction events safely without recursion
+    if canvas_events and "selection" in canvas_events:
+        sel = canvas_events["selection"]
+        points = sel.get("points", [])
+        boxes = sel.get("box", [])
+        
+        # 1. Point click -> switch active selected qubit
+        if points:
+            pt = points[0]
+            clicked_qid = pt.get("customdata")
+            if clicked_qid and clicked_qid in valid_q_ids:
+                if clicked_qid != active_qid:
+                    st.session_state["selected_qubit_id"] = clicked_qid
+                    st.rerun()
+
+        # 2. Box / area selection in Select / Move Mode -> reposition selected qubit
+        if interaction_mode == "✋ Select / Move Mode" and boxes and active_qid:
+            b = boxes[0]
+            new_x = float((b["x"][0] + b["x"][1]) / 2.0)
+            new_y = float((b["y"][0] + b["y"][1]) / 2.0)
+            target_q = next((q for q in project.qubits if q.id == active_qid), None)
+            if target_q and target_q.movable:
+                clamped_x = max(0.0, min(float(project.chip_width_um), round(new_x, 1)))
+                clamped_y = max(0.0, min(float(project.chip_height_um), round(new_y, 1)))
+                if target_q.x_um != clamped_x or target_q.y_um != clamped_y:
+                    target_q.x_um = clamped_x
+                    target_q.y_um = clamped_y
+                    _set_project(project)
+                    st.session_state["editor_version"] += 1
+                    st.rerun()
+
+    # Interactive direct placement controls in Select / Move Mode
+    if interaction_mode == "✋ Select / Move Mode" and active_qid:
+        active_q = next((q for q in project.qubits if q.id == active_qid), None)
+        if active_q:
+            st.info(f"✋ **Active Qubit:** `{active_qid}` at `({active_q.x_um:.1f}, {active_q.y_um:.1f}) µm`. Click a qubit on canvas to select it, or use the placement controls / box-select tool on the canvas to move it.")
+            
+            p_col1, p_col2, p_col3, p_col4, p_col5 = st.columns([2, 2, 1.5, 1, 1])
+            target_x = p_col1.number_input("Target X (µm)", min_value=0.0, max_value=float(project.chip_width_um), value=float(active_q.x_um), step=1.0, key=f"place_x_{active_qid}_{st.session_state.editor_version}")
+            target_y = p_col2.number_input("Target Y (µm)", min_value=0.0, max_value=float(project.chip_height_um), value=float(active_q.y_um), step=1.0, key=f"place_y_{active_qid}_{st.session_state.editor_version}")
+            
+            with p_col3:
+                if st.button("Move to Target", type="primary", use_container_width=True, key=f"btn_apply_mv_{active_qid}"):
+                    if active_q.movable:
+                        active_q.x_um = target_x
+                        active_q.y_um = target_y
+                        _set_project(project)
+                        st.session_state["editor_version"] += 1
+                        st.rerun()
+                    else:
+                        st.warning(f"{active_qid} is marked as non-movable.")
+            with p_col4:
+                if st.button("⬅️ -5µm", use_container_width=True, key=f"nudge_left_{active_qid}"):
+                    if active_q.movable:
+                        active_q.x_um = max(0.0, active_q.x_um - 5.0)
+                        _set_project(project)
+                        st.session_state["editor_version"] += 1
+                        st.rerun()
+            with p_col5:
+                if st.button("➡️ +5µm", use_container_width=True, key=f"nudge_right_{active_qid}"):
+                    if active_q.movable:
+                        active_q.x_um = min(float(project.chip_width_um), active_q.x_um + 5.0)
+                        _set_project(project)
+                        st.session_state["editor_version"] += 1
+                        st.rerun()
 
     st.divider()
     st.markdown("### Visual Q-DRC Dashboard")
@@ -613,7 +733,12 @@ def render_analyze_tab(project):
         st.info("No qubits available. Add a qubit in the Design tab to inspect it.")
     else:
         q_ids = [q.id for q in project.qubits]
-        selected_q_id = st.selectbox("Select Qubit ID", options=q_ids, key="inspect_q_id_analyze")
+        idx = q_ids.index(active_qid) if active_qid in q_ids else 0
+        selected_q_id = st.selectbox("Select Qubit ID", options=q_ids, index=idx, key="inspect_q_id_analyze")
+        if selected_q_id and selected_q_id != active_qid:
+            st.session_state["selected_qubit_id"] = selected_q_id
+            st.rerun()
+            
         if selected_q_id:
             q = next((q for q in project.qubits if q.id == selected_q_id), None)
             if q:
