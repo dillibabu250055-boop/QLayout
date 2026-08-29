@@ -427,7 +427,7 @@ def render_design_tab(project):
     st.divider()
     st.divider()
     st.subheader("📐 Generate Layouts")
-    st.write("Generate candidate layouts using deterministic algorithms for the current qubits.")
+    st.write("Generate candidate layouts using deterministic algorithms for the current qubits in the layout.")
     
     if st.button("Generate Candidate Layouts"):
         if len(project.qubits) < 2:
@@ -762,8 +762,8 @@ def render_optimize_tab(project):
         st.subheader("Optimization Result")
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Before LQS", f"{result.lqs_before:.1f}")
-        c2.metric("After LQS", f"{result.lqs_after:.1f}")
+        c1.metric("Starting LQS", f"{result.lqs_before:.1f}")
+        c2.metric("Candidate LQS", f"{result.lqs_after:.1f}")
         improvement = result.lqs_after - result.lqs_before
         c3.metric("Improvement", f"+{improvement:.1f}" if improvement > 0 else f"{improvement:.1f}")
         
@@ -773,43 +773,60 @@ def render_optimize_tab(project):
             y_vals = [result.lqs_before] + [m["lqs_after"] for m in result.movements]
             
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines+markers', line=dict(color=COLORS['intended'])))
+            fig.add_trace(
+                go.Scatter(
+                    x=x_vals,
+                    y=y_vals,
+                    mode="lines+markers",
+                    name="LQS",
+                    line=dict(color=COLORS["intended"], width=2),
+                    marker=dict(size=6),
+                )
+            )
             fig.update_layout(
-                xaxis_title="Iteration",
-                yaxis_title="LQS",
+                xaxis_title="Iteration (Accepted Improvement Steps)",
+                yaxis_title="Layout Quality Score (LQS)",
                 paper_bgcolor=COLORS["bg"],
                 plot_bgcolor=COLORS["bg"],
                 font=dict(color=COLORS["text"]),
                 margin=dict(l=20, r=20, t=20, b=20),
-                height=300
+                height=300,
             )
             st.plotly_chart(fig, use_container_width=True)
+            st.caption("Note: Chart plots recorded LQS progression across accepted improvement steps from Iteration 0.")
+        else:
+            st.info("Optimization history is unavailable for this run.")
             
-        st.subheader("✅ Optimization Complete")
+        st.subheader("📊 Optimization Telemetry")
         
         reason_map = {
             "patience_exhausted": "No further LQS-improving legal moves found.",
             "no_movable_qubits": "No movable qubits were available.",
             "max_iterations": "Maximum optimization iterations reached.",
             "no_improvement": "No further LQS improvement was found.",
-            "already_optimal": "Layout was already optimal under the current constraints."
+            "already_optimal": "Layout was already optimal under the current constraints.",
         }
         human_reason = reason_map.get(result.stopped_reason, f"Optimization stopped: {result.stopped_reason}")
         
-        st.info(f"**Starting LQS:** {result.lqs_before:.1f}\n\n"
-                f"**Final LQS:** {result.lqs_after:.1f}\n\n"
-                f"**Improvement:** +{improvement:.1f} \n\n"
-                f"**Iterations:** {result.iterations}\n\n"
-                f"**Stopped Reason:** {human_reason}")
+        imp_str = f"+{improvement:.1f}" if improvement > 0 else f"{improvement:.1f}"
+        st.info(
+            f"**Starting LQS:** {result.lqs_before:.1f}\n\n"
+            f"**Candidate LQS:** {result.lqs_after:.1f}\n\n"
+            f"**Improvement:** {imp_str}\n\n"
+            f"**Total Iterations:** {result.iterations}\n\n"
+            f"**Accepted Moves:** {len(result.movements)}\n\n"
+            f"**Stopped Reason:** {human_reason}"
+        )
                 
         st.divider()
-        st.markdown("### Review Candidate")
+        st.markdown("### Review Candidate Layout")
         c_apply, c_discard = st.columns(2)
-        if c_apply.button("✅ Apply Candidate", type="primary", use_container_width=True):
+        if c_apply.button("✅ Apply Candidate Layout", type="primary", use_container_width=True):
             _set_project(candidate)
             st.session_state["candidate_project"] = None
             st.session_state["last_optimization_result"] = None
             st.session_state["editor_version"] += 1
+            st.success("Candidate layout applied successfully.")
             st.rerun()
             
         if c_discard.button("❌ Discard", use_container_width=True):
@@ -826,19 +843,21 @@ def main():
     st.title("Q-Layout")
     st.caption(f"Project: {project.name}")
 
-    tab_design, tab_analyze, tab_optimize = st.tabs([
-        "Design",
-        "Analyze",
-        "Optimize"
-    ])
+    # --- 3-TAB EDA ARCHITECTURE ---
+    tab_design, tab_analyze, tab_optimize = st.tabs(
+        ["🛠️ Design", "📊 Analyze", "🚀 Optimize"]
+    )
 
     with tab_design:
+        # Move the existing design-related UI into this tab.
         render_design_tab(project)
 
     with tab_analyze:
+        # Move the existing analysis UI into this tab.
         render_analyze_tab(project)
 
     with tab_optimize:
+        # Move the existing optimization UI into this tab.
         render_optimize_tab(project)
 
 if __name__ == "__main__":
