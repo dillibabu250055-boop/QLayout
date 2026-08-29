@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from models.schema import Qubit, Connection, ChipConstraints, Project
-from core.scoring import compute_lqs, explain_risk
+from core.scoring import compute_lqs, explain_risk, get_severity_from_penalty
 from core.q_drc import validate_layout
 from core.physics_engine import build_risk_results
 from core.optimizer import optimize_layout
@@ -84,7 +84,7 @@ def _apply_movements(qubits, movements):
         for q in qubits
     ]
 
-def _build_canvas(project):
+def _build_canvas(project, show_intended=True, show_high=True, show_medium=True, show_low=False):
     qubits = project.qubits
     connections = project.connections
     chip_width = project.chip_width_um
@@ -108,14 +108,39 @@ def _build_canvas(project):
         if not q_a or not q_b:
             continue
 
-        if rr.interaction_weight > 0.0:
+        is_intended = rr.interaction_weight > 0.0
+        
+        draw = False
+        if is_intended and show_intended:
+            draw = True
+        if rr.severity == "HIGH" and show_high:
+            draw = True
+        if rr.severity == "MEDIUM" and show_medium:
+            draw = True
+        if rr.severity == "LOW" and show_low:
+            draw = True
+            
+        if not draw:
+            continue
+
+        if is_intended:
             color = COLORS["intended"]
             dash = "solid"
             width = 1.5
+            if rr.severity in ["HIGH", "MEDIUM"] and ((rr.severity == "HIGH" and show_high) or (rr.severity == "MEDIUM" and show_medium)):
+                bg_color = COLORS["high_risk"] if rr.severity == "HIGH" else COLORS["medium_risk"]
+                fig.add_trace(go.Scatter(
+                    x=[q_a.x_um, q_b.x_um],
+                    y=[q_a.y_um, q_b.y_um],
+                    mode="lines",
+                    line=dict(color=bg_color, width=4.0, dash="dash"),
+                    hoverinfo="none",
+                    showlegend=False,
+                ))
         else:
-            if rr.objective_penalty > 0.65:
+            if rr.severity == "HIGH":
                 color = COLORS["high_risk"]
-            elif rr.objective_penalty >= 0.3:
+            elif rr.severity == "MEDIUM":
                 color = COLORS["medium_risk"]
             else:
                 color = COLORS["low_risk"]
@@ -131,24 +156,32 @@ def _build_canvas(project):
             showlegend=False,
         ))
 
-    q_x = [q.x_um for q in qubits]
-    q_y = [q.y_um for q in qubits]
-    q_text = [
-        f"{q.id}<br>x={q.x_um:.1f}, y={q.y_um:.1f}<br>f={q.frequency_mhz:.0f} MHz"
-        for q in qubits
-    ]
+    if not qubits:
+        fig.add_annotation(
+            text="No qubits defined.",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=20, color=COLORS["text"])
+        )
+    else:
+        q_x = [q.x_um for q in qubits]
+        q_y = [q.y_um for q in qubits]
+        q_text = [
+            f"{q.id}<br>x={q.x_um:.1f}, y={q.y_um:.1f}<br>f={q.frequency_mhz:.0f} MHz"
+            for q in qubits
+        ]
 
-    fig.add_trace(go.Scatter(
-        x=q_x,
-        y=q_y,
-        mode="markers+text",
-        marker=dict(size=16, color=COLORS["text"], line=dict(width=2, color=COLORS["bg"])),
-        text=[q.id for q in qubits],
-        textposition="top center",
-        hovertext=q_text,
-        hoverinfo="text",
-        showlegend=False,
-    ))
+        fig.add_trace(go.Scatter(
+            x=q_x,
+            y=q_y,
+            mode="markers+text",
+            marker=dict(size=16, color=COLORS["text"], line=dict(width=2, color=COLORS["bg"])),
+            text=[q.id for q in qubits],
+            textposition="top center",
+            hovertext=q_text,
+            hoverinfo="text",
+            showlegend=False,
+        ))
 
     fig.update_layout(
         paper_bgcolor=COLORS["bg"],
@@ -455,10 +488,46 @@ def render_design_tab(project):
         )
 
 def render_analyze_tab(project):
+    risk_results = build_risk_results(project.qubits, project.connections)
+    drc = validate_layout(
+        project.qubits,
+        project.constraints,
+        project.connections,
+        project.chip_width_um,
+        project.chip_height_um,
+    )
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Total Qubits", len(project.qubits))
+    col2.metric("Intended Connections", len(project.connections))
+    
+    high_risk_count = sum(1 for rr in risk_results if rr.severity == "HIGH")
+    med_risk_count = sum(1 for rr in risk_results if rr.severity == "MEDIUM")
+    
+    col3.metric("High Risk Pairs", high_risk_count)
+    col4.metric("Medium Risk Pairs", med_risk_count)
+    
+    if drc.violations:
+        drc_status = "FAIL"
+    elif drc.warnings:
+        drc_status = "WARN"
+    else:
+        drc_status = "PASS"
+    col5.metric("Q-DRC", drc_status)
+    
+    st.divider()
+
+    st.markdown("### Risk Visibility Controls")
+    c1, c2, c3, c4 = st.columns(4)
+    show_intended = c1.checkbox("Intended", value=True)
+    show_high = c2.checkbox("High Risk", value=True)
+    show_medium = c3.checkbox("Medium Risk", value=True)
+    show_low = c4.checkbox("Low Risk", value=False)
+    
     col_canvas, col_info = st.columns([3, 1])
 
     with col_canvas:
-        fig = _build_canvas(project)
+        fig = _build_canvas(project, show_intended, show_high, show_medium, show_low)
         st.plotly_chart(fig, use_container_width=True)
 
     with col_info:
@@ -466,7 +535,6 @@ def render_analyze_tab(project):
         lqs = compute_lqs(project.qubits, project.connections)
         st.metric("Layout Quality Score", f"{lqs:.1f} / 100")
         
-        risk_results = build_risk_results(project.qubits, project.connections)
         if not risk_results:
             st.metric("Worst Pair Risk", "N/A")
         else:
@@ -474,7 +542,7 @@ def render_analyze_tab(project):
             penalty = worst_risk.objective_penalty
             pair_str = f"{worst_risk.source_qubit_id} <-> {worst_risk.target_qubit_id}"
             
-            if penalty > 0.65:
+            if worst_risk.severity == "HIGH":
                 st.metric("Worst Pair Risk", f"{penalty:.3f} (HIGH)")
                 st.caption(f"**High Risk Pair:** {pair_str}")
             else:
@@ -484,13 +552,6 @@ def render_analyze_tab(project):
         st.divider()
 
         st.subheader("Q-DRC Summary")
-        drc = validate_layout(
-            project.qubits,
-            project.constraints,
-            project.connections,
-            project.chip_width_um,
-            project.chip_height_um,
-        )
         if not drc.violations and not drc.warnings:
             st.success("PASS: No violations or warnings.")
         else:
@@ -503,7 +564,7 @@ def render_analyze_tab(project):
     st.subheader("Risk Explanation")
     
     if not risk_results:
-        st.info("No connections defined to analyze.")
+        st.info("Not enough qubits to analyze risk.")
     else:
         options = [f"{rr.source_qubit_id} <-> {rr.target_qubit_id}" for rr in risk_results]
         selected_pair = st.selectbox("Select a pair to inspect", options=options)
@@ -512,9 +573,9 @@ def render_analyze_tab(project):
             if f"{rr.source_qubit_id} <-> {rr.target_qubit_id}" == selected_pair:
                 explanation = explain_risk(rr)
                 
-                c1, c2 = st.columns(2)
-                c1.write(f"**Severity:** {explanation['severity']}")
-                c2.write(f"**Penalty:** {explanation['objective_penalty']:.4f}")
+                c_a, c_b = st.columns(2)
+                c_a.write(f"**Severity:** {explanation['severity']}")
+                c_b.write(f"**Penalty:** {explanation['objective_penalty']:.4f}")
                 
                 st.markdown("**Reasons:**")
                 for reason in explanation["reasons"]:
@@ -548,12 +609,30 @@ def render_optimize_tab(project):
         st.subheader("Optimization Results")
         result = st.session_state["last_optimization_result"]
         
+        if result.movements:
+            x_vals = [0] + [m["iteration"] for m in result.movements]
+            y_vals = [result.lqs_before] + [m["lqs_after"] for m in result.movements]
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines+markers', line=dict(color=COLORS['intended'])))
+            fig.update_layout(
+                title="Optimization Convergence",
+                xaxis_title="Iteration",
+                yaxis_title="LQS",
+                paper_bgcolor=COLORS["bg"],
+                plot_bgcolor=COLORS["bg"],
+                font=dict(color=COLORS["text"]),
+                margin=dict(l=20, r=20, t=40, b=20),
+                height=300
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
         c1, c2, c3 = st.columns(3)
-        c1.metric("Before", f"LQS = {result.lqs_before:.1f}")
-        c2.metric("After", f"LQS = {result.lqs_after:.1f}")
+        c1.metric("Initial LQS", f"{result.lqs_before:.1f}")
+        c2.metric("Final LQS", f"{result.lqs_after:.1f}")
         
         improvement = result.lqs_after - result.lqs_before
-        c3.metric("Improvement", f"{improvement:.1f}")
+        c3.metric("Improvement", f"+{improvement:.1f}" if improvement > 0 else f"{improvement:.1f}")
         
         st.info(f"**Iterations:** {result.iterations} | **Stopped:** {result.stopped_reason}")
     else:
