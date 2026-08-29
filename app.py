@@ -424,29 +424,39 @@ def render_design_tab(project):
 
     st.divider()
 
-    st.markdown("### Selected Qubit")
+    st.markdown("### Qubit Inspector")
     if not project.qubits:
-        st.info("No qubits available.")
+        st.info("No qubits available.\n\nAdd a qubit in the Design tab to inspect it.")
     else:
-        selected_q_id = st.selectbox("Inspect Qubit", options=q_ids, key="inspect_q_id")
+        selected_q_id = st.selectbox("Select Qubit", options=q_ids, key="inspect_q_id")
         if selected_q_id:
             q = next((q for q in project.qubits if q.id == selected_q_id), None)
             if q:
-                st.write(f"**ID:** {q.id} | **Position:** ({q.x_um:.1f}, {q.y_um:.1f}) | **Frequency:** {q.frequency_mhz:.0f} MHz | **Movable:** {q.movable}")
+                st.markdown(f"**QUBIT INSPECTOR — {q.id}**")
+                
+                import math
+                nearest_id = None
+                nearest_dist = float('inf')
+                for other_q in project.qubits:
+                    if other_q.id != q.id:
+                        dist = math.hypot(q.x_um - other_q.x_um, q.y_um - other_q.y_um)
+                        if dist < nearest_dist:
+                            nearest_dist = dist
+                            nearest_id = other_q.id
+                
+                nearest_str = f"{nearest_id}\nDistance: {nearest_dist:.1f} um" if nearest_id else "N/A — only one qubit"
                 
                 risk_results = build_risk_results(project.qubits, project.connections)
                 q_risks = [r for r in risk_results if r.source_qubit_id == q.id or r.target_qubit_id == q.id]
                 
                 if q_risks:
-                    nearest = min(q_risks, key=lambda r: r.distance_um)
                     worst = max(q_risks, key=lambda r: r.objective_penalty)
-                    nearest_other = nearest.target_qubit_id if nearest.source_qubit_id == q.id else nearest.source_qubit_id
-                    worst_other = worst.target_qubit_id if worst.source_qubit_id == q.id else worst.source_qubit_id
-                    
-                    st.write(f"- **Nearest qubit:** {nearest_other} ({nearest.distance_um:.2f} um)")
-                    st.write(f"- **Worst interaction:** {worst_other} (Penalty: {worst.objective_penalty:.3f}, Severity: {worst.severity})")
+                    icon = "🔴" if worst.severity == "HIGH" else "🟡" if worst.severity == "MEDIUM" else "🟢"
+                    worst_str = f"{icon} {worst.severity}\nPenalty: {worst.objective_penalty:.3f}\nPair: {worst.source_qubit_id} ↔ {worst.target_qubit_id}"
                 else:
-                    st.write("No risk results involving this qubit (requires at least 2 connected/interacting qubits).")
+                    worst_str = "N/A"
+                    
+                st.info(f"**Position**\nX: {q.x_um:.1f} µm    Y: {q.y_um:.1f} µm\n\n**Frequency**\n{q.frequency_mhz:,.0f} MHz\n\n**Nearest Neighbor**\n{nearest_str}\n\n**Worst Pair Risk**\n{worst_str}")
 
     st.divider()
     st.subheader("Export")
@@ -553,36 +563,54 @@ def render_analyze_tab(project):
 
         st.divider()
 
-        st.subheader("Q-DRC Summary")
+        st.markdown("### Visual Q-DRC Dashboard")
+    if len(project.qubits) < 2:
+        st.info("No checks available.\nAdd at least two qubits to begin pairwise analysis.")
+    else:
         if not drc.violations and not drc.warnings:
-            st.success("PASS: No violations or warnings.")
+            st.success("🟢 **Q-DRC PASS**\n\nNo active violations detected.")
         else:
             if drc.violations:
-                st.error(f"FAIL: {len(drc.violations)} violations.")
+                st.error(f"🔴 **FAIL — {len(drc.violations)} violation(s)**")
+                for v in drc.violations:
+                    st.write(f"- ❌ {v}")
             if drc.warnings:
-                st.warning(f"WARN: {len(drc.warnings)} warnings.")
+                st.warning(f"🟡 **WARN — {len(drc.warnings)} warning(s)**")
+                for w in drc.warnings:
+                    st.write(f"- ⚠ {w}")
 
     st.divider()
-    st.subheader("Risk Explanation")
+    st.subheader("Risk Explainability")
     
     if not risk_results:
         st.info("Not enough qubits to analyze risk.")
     else:
-        options = [f"{rr.source_qubit_id} <-> {rr.target_qubit_id}" for rr in risk_results]
-        selected_pair = st.selectbox("Select a pair to inspect", options=options)
+        options = [f"{rr.source_qubit_id} ↔ {rr.target_qubit_id}" for rr in risk_results]
+        selected_pair = st.selectbox("Select a risk pair to inspect its detailed explanation", options=[""] + options)
 
-        for rr in risk_results:
-            if f"{rr.source_qubit_id} <-> {rr.target_qubit_id}" == selected_pair:
-                explanation = explain_risk(rr)
-                
-                c_a, c_b = st.columns(2)
-                c_a.write(f"**Severity:** {explanation['severity']}")
-                c_b.write(f"**Penalty:** {explanation['objective_penalty']:.4f}")
-                
-                st.markdown("**Reasons:**")
-                for reason in explanation["reasons"]:
-                    st.markdown(f"- {reason}")
-                break
+        if selected_pair:
+            for rr in risk_results:
+                if f"{rr.source_qubit_id} ↔ {rr.target_qubit_id}" == selected_pair:
+                    explanation = explain_risk(rr)
+                    icon = "🔴" if rr.severity == "HIGH" else "🟡" if rr.severity == "MEDIUM" else "🟢"
+                    
+                    st.markdown(f"### {selected_pair}\n**{icon} {rr.severity} RISK**")
+                    
+                    c_a, c_b = st.columns(2)
+                    c_a.markdown(f"**Distance**\n{rr.distance_um:.1f} µm")
+                    c_b.markdown(f"**Frequency Delta**\n{rr.frequency_delta_mhz:.1f} MHz")
+                    
+                    c_c, c_d = st.columns(2)
+                    interaction = "Intended" if rr.interaction_weight > 0 else "Unintended"
+                    c_c.markdown(f"**Interaction**\n{interaction}")
+                    c_d.markdown(f"**Objective Penalty**\n{rr.objective_penalty:.3f}")
+                    
+                    st.markdown("**Primary Cause**")
+                    for reason in explanation["reasons"]:
+                        st.markdown(f"- {reason}")
+                        
+                    st.info("**Recommended proxy-level mitigation**\n• Increase physical separation between the qubits\n• OR increase their frequency separation\n• Re-run Q-DRC after modification")
+                    break
 
 def render_optimize_tab(project):
     st.subheader("Optimizer Control")
@@ -608,17 +636,43 @@ def render_optimize_tab(project):
     st.divider()
     
     if "last_optimization_result" in st.session_state and st.session_state["last_optimization_result"]:
-        st.subheader("Optimization Results")
         result = st.session_state["last_optimization_result"]
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Initial LQS", f"{result.lqs_before:.1f}")
-        c2.metric("Final LQS", f"{result.lqs_after:.1f}")
+        if result.movements:
+            x_vals = [0] + [m["iteration"] for m in result.movements]
+            y_vals = [result.lqs_before] + [m["lqs_after"] for m in result.movements]
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines+markers', line=dict(color=COLORS['intended'])))
+            fig.update_layout(
+                title="Optimization Convergence",
+                xaxis_title="Iteration",
+                yaxis_title="LQS",
+                paper_bgcolor=COLORS["bg"],
+                plot_bgcolor=COLORS["bg"],
+                font=dict(color=COLORS["text"]),
+                margin=dict(l=20, r=20, t=40, b=20),
+                height=300
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+        st.subheader("Optimization Complete")
+        
+        reason_map = {
+            "patience_exhausted": "No further LQS-improving legal moves found",
+            "no_movable_qubits": "No movable qubits were available",
+            "max_iterations": "Maximum optimization iterations reached"
+        }
+        human_reason = reason_map.get(result.stopped_reason, f"Optimization stopped: {result.stopped_reason}")
         
         improvement = result.lqs_after - result.lqs_before
-        c3.metric("Improvement", f"+{improvement:.1f}" if improvement > 0 else f"{improvement:.1f}")
         
-        st.info(f"**Iterations:** {result.iterations} | **Stopped:** {result.stopped_reason}")
+        st.info(f"**🚀 OPTIMIZATION COMPLETE**\n\n"
+                f"**Starting LQS:** {result.lqs_before:.1f}\n\n"
+                f"**Final LQS:** {result.lqs_after:.1f}\n\n"
+                f"**Improvement:** +{improvement:.1f} \n\n"
+                f"**Total Iterations:** {result.iterations}\n\n"
+                f"**Stopped Because:**\n✓ {human_reason}")
     else:
         st.info("Run the optimizer to see results.")
 
