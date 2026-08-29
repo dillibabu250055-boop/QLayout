@@ -57,6 +57,21 @@ All optimization steps are logged in the success message: iterations run, final 
 
 ---
 
+## Future Scope
+
+The current implementation provides a robust pre-simulation screening environment. Future capability expansions include:
+
+- **Planar Routing DRC**: Advanced 2D line-segment intersection checking for routing geometries.
+- **Fabrication-Aware DRC**: Configurable PDK-specific rules (e.g., universal minimum feature size or capacitor pad dimensions).
+- **Multi-objective Optimization**: Simultaneous tuning of multiple architectural parameters.
+- **GDSII Generation**: Export layouts directly for lithography workflows.
+- **High-fidelity EM Simulator Integration**: Seamless bridging to tools like Ansys HFSS.
+- **Qiskit Metal Interoperability**: Bi-directional schematic exchange.
+- **Validated AI Design Assistant**: Integrating a real LLM connected to the structured physics diagnostic context.
+- **Closed-loop Simulation/Measurement Optimization**: Updating heuristic priors from real physical backend testing.
+
+---
+
 ## Technology Stack
 
 | Component | Technology |

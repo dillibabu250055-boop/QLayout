@@ -425,6 +425,88 @@ def render_design_tab(project):
             st.rerun()
 
     st.divider()
+    st.divider()
+    st.subheader("📐 Generate Layouts")
+    st.write("Generate candidate layouts using deterministic algorithms for the current qubits.")
+    
+    if st.button("Generate Candidate Layouts"):
+        if len(project.qubits) < 2:
+            st.warning("Please add at least 2 qubits to generate layouts.")
+        else:
+            candidates = []
+            N = len(project.qubits)
+            import math
+            import copy
+            
+            # 1. Grid
+            grid_q = copy.deepcopy(project.qubits)
+            cols = math.ceil(math.sqrt(N))
+            spacing = project.constraints.min_qubit_spacing_um * 1.5
+            for i, q in enumerate(grid_q):
+                q.x_um = float((i % cols) * spacing + 10.0)
+                q.y_um = float((i // cols) * spacing + 10.0)
+            candidates.append(("Grid", grid_q))
+            
+            # 2. Ring
+            ring_q = copy.deepcopy(project.qubits)
+            radius = spacing * N / (2 * math.pi)
+            radius = max(radius, spacing)
+            for i, q in enumerate(ring_q):
+                angle = 2 * math.pi * i / N
+                q.x_um = float(radius * math.cos(angle) + radius + 10.0)
+                q.y_um = float(radius * math.sin(angle) + radius + 10.0)
+            candidates.append(("Ring", ring_q))
+            
+            # 3. Line (Nearest-Neighbor)
+            line_q = copy.deepcopy(project.qubits)
+            for i, q in enumerate(line_q):
+                q.x_um = float(i * spacing + 10.0)
+                q.y_um = 10.0
+            candidates.append(("Line (Nearest-Neighbor)", line_q))
+            
+            best_score = -1000000.0
+            best_name = ""
+            best_qubits = None
+            
+            st.markdown("### Candidate Evaluation")
+            c_cols = st.columns(3)
+            
+            for idx, (name, c_qubits) in enumerate(candidates):
+                c_lqs = compute_lqs(c_qubits, project.connections)
+                c_drc = validate_layout(c_qubits, project.constraints, project.connections, project.chip_width_um, project.chip_height_um)
+                c_risks = build_risk_results(c_qubits, project.connections)
+                c_worst_risk = max((r.objective_penalty for r in c_risks), default=0.0)
+                
+                # Scoring rule: 1. Prefer zero hard failures 2. Higher LQS 3. Lower worst-pair risk
+                c_fail = len(c_drc.violations)
+                score = - (c_fail * 1000.0) + c_lqs - c_worst_risk
+                if score > best_score or best_name == "":
+                    best_score = score
+                    best_name = name
+                    best_qubits = c_qubits
+                    
+                with c_cols[idx]:
+                    st.markdown(f"**{name}**")
+                    st.write(f"**LQS:** {c_lqs:.1f}")
+                    st.write(f"**Worst Risk:** {c_worst_risk:.2f}")
+                    drc_status = "🔴 FAIL" if c_fail > 0 else ("🟡 WARN" if len(c_drc.warnings) > 0 else "🟢 PASS")
+                    st.write(f"**DRC:** {drc_status}")
+                    
+            st.success(f"🏆 **BEST CANDIDATE:** {best_name}")
+            
+            project_copy = copy.deepcopy(project)
+            project_copy.qubits = best_qubits
+            st.session_state["layout_gen_candidate"] = project_copy
+
+    if "layout_gen_candidate" in st.session_state:
+        st.info("A candidate layout is pending. Apply it to overwrite the current coordinates.")
+        if st.button("✅ Apply Generated Layout", type="primary"):
+            _set_project(st.session_state["layout_gen_candidate"])
+            del st.session_state["layout_gen_candidate"]
+            st.session_state["editor_version"] += 1
+            st.rerun()
+
+    st.divider()
     st.subheader("Export")
     if st.button("Export Layout"):
         layout_data = {
@@ -610,6 +692,37 @@ def render_analyze_tab(project):
                         
                     st.info("**Recommended proxy-level mitigation**\n• Increase physical separation between the qubits\n• OR increase their frequency separation\n• Re-run Q-DRC after modification")
                     break
+
+    st.divider()
+    st.subheader("🤖 Q-Layout Copilot")
+    st.caption("*AI-Assisted / Heuristic Recommendation*")
+    
+    if not project.qubits:
+        st.info("Copilot needs at least one qubit to provide recommendations.")
+    else:
+        worst_pair_str = "None"
+        primary_issue = "No critical issues detected."
+        recommendation = "Layout looks structurally sound. Consider running Auto-Optimize to improve LQS further."
+        
+        if drc.violations:
+            primary_issue = "Hard DRC violations present (e.g. minimum spacing or boundary breaches)."
+            recommendation = "Resolve hard DRC failures first. Move overlapping qubits apart or expand the chip boundary."
+        elif risk_results:
+            worst = max(risk_results, key=lambda r: r.objective_penalty)
+            worst_pair_str = f"{worst.source_qubit_id} ↔ {worst.target_qubit_id}"
+            if worst.severity == "HIGH":
+                primary_issue = f"High coupling risk detected on pair {worst_pair_str}."
+                if worst.distance_um < project.constraints.min_qubit_spacing_um * 2:
+                    recommendation = "Increase spatial separation first. If connectivity must be preserved, review frequency allocation as a secondary mitigation."
+                else:
+                    recommendation = "Spatial separation is adequate, but frequency collision is causing high spectral risk. Shift the operating frequency of one of the qubits."
+            elif worst.severity == "MEDIUM":
+                primary_issue = f"Moderate coupling risk detected on pair {worst_pair_str}."
+                recommendation = "Review frequency allocation or slightly increase spatial separation to improve safety margins."
+        
+        st.markdown(f"**Highest-Risk Target:** {worst_pair_str}")
+        st.markdown(f"**Primary Contributor:**\n{primary_issue}")
+        st.info(f"**Suggested proxy-level action:**\n{recommendation}")
 
 def render_optimize_tab(project):
     st.subheader("⚡ Automatic Layout Optimization")
