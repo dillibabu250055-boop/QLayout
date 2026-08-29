@@ -210,6 +210,7 @@ def _build_canvas(project, show_intended=True, show_high=True, show_medium=True,
         ))
 
     fig.update_layout(
+        uirevision="constant",
         paper_bgcolor=COLORS["bg"],
         plot_bgcolor=COLORS["bg"],
         font=dict(color=COLORS["text"]),
@@ -619,8 +620,8 @@ def render_analyze_tab(project):
     with ctrl_col2:
         st.markdown("### Canvas Interaction Mode")
         interaction_mode = st.radio(
-            "Interaction Mode",
-            ["✋ Select / Move Mode", "🔍 Inspect Mode"],
+            "Mode",
+            ["🔍 Inspect", "✋ Move"],
             horizontal=True,
             label_visibility="collapsed",
             key="canvas_interaction_mode_radio"
@@ -641,10 +642,10 @@ def render_analyze_tab(project):
         use_container_width=True,
         on_select="rerun",
         selection_mode=["points", "box"],
-        key=f"chip_canvas_{st.session_state.editor_version}",
+        key="main_chip_canvas_plot",
     )
     
-    # Process canvas interaction events safely without recursion
+    # Process canvas interaction events safely on drop/selection release
     if canvas_events and "selection" in canvas_events:
         sel = canvas_events["selection"]
         points = sel.get("points", [])
@@ -659,8 +660,8 @@ def render_analyze_tab(project):
                     st.session_state["selected_qubit_id"] = clicked_qid
                     st.rerun()
 
-        # 2. Box / area selection in Select / Move Mode -> reposition selected qubit
-        if interaction_mode == "✋ Select / Move Mode" and boxes and active_qid:
+        # 2. Box / area selection in Move Mode -> reposition selected qubit on drop
+        if interaction_mode == "✋ Move" and boxes and active_qid:
             b = boxes[0]
             new_x = float((b["x"][0] + b["x"][1]) / 2.0)
             new_y = float((b["y"][0] + b["y"][1]) / 2.0)
@@ -675,8 +676,8 @@ def render_analyze_tab(project):
                     st.session_state["editor_version"] += 1
                     st.rerun()
 
-    # Interactive direct placement controls in Select / Move Mode
-    if interaction_mode == "✋ Select / Move Mode" and active_qid:
+    # Interactive direct placement controls in Move Mode
+    if interaction_mode == "✋ Move" and active_qid:
         active_q = next((q for q in project.qubits if q.id == active_qid), None)
         if active_q:
             st.info(f"✋ **Active Qubit:** `{active_qid}` at `({active_q.x_um:.1f}, {active_q.y_um:.1f}) µm`. Click a qubit on canvas to select it, or use the placement controls / box-select tool on the canvas to move it.")
