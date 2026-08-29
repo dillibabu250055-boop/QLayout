@@ -556,24 +556,27 @@ def render_analyze_tab(project):
         project.chip_width_um,
         project.chip_height_um,
     )
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Total Qubits", len(project.qubits))
-    col2.metric("Intended Connections", len(project.connections))
-    
-    high_risk_count = sum(1 for rr in risk_results if rr.severity == "HIGH")
-    med_risk_count = sum(1 for rr in risk_results if rr.severity == "MEDIUM")
-    
-    col3.metric("High Risk Pairs", high_risk_count)
-    col4.metric("Medium Risk Pairs", med_risk_count)
+    lqs = compute_lqs(project.qubits, project.connections)
     
     if drc.violations:
-        drc_status = "FAIL"
+        drc_status = "🔴 FAIL"
     elif drc.warnings:
-        drc_status = "WARN"
+        drc_status = "🟡 WARN"
     else:
-        drc_status = "PASS"
-    col5.metric("Q-DRC", drc_status)
+        drc_status = "🟢 PASS"
+        
+    worst_penalty = max((r.objective_penalty for r in risk_results), default=0.0)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Qubits", len(project.qubits))
+    col2.metric("LQS Score", f"{lqs:.1f} / 100")
+    col3.metric("Q-DRC Status", drc_status)
+    if not risk_results:
+        col4.metric("Worst Pair Risk", "0.00")
+    elif worst_penalty > 0.65:
+        col4.metric("Worst Pair Risk", f"{worst_penalty:.3f}", delta="Critical (>0.65)", delta_color="inverse")
+    else:
+        col4.metric("Worst Pair Risk", f"{worst_penalty:.3f}")
     
     st.divider()
 
@@ -584,39 +587,16 @@ def render_analyze_tab(project):
     show_medium = c3.checkbox("Medium Risk", value=True)
     show_low = c4.checkbox("Low Risk", value=False)
     
-    col_canvas, col_info = st.columns([3, 1])
+    fig = _build_canvas(project, show_intended, show_high, show_medium, show_low)
+    st.plotly_chart(fig, use_container_width=True)
 
-    with col_canvas:
-        fig = _build_canvas(project, show_intended, show_high, show_medium, show_low)
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col_info:
-        st.subheader("Metrics")
-        lqs = compute_lqs(project.qubits, project.connections)
-        st.metric("Layout Quality Score", f"{lqs:.1f} / 100")
-        
-        if not risk_results:
-            st.metric("Worst Pair Risk", "N/A")
-        else:
-            worst_risk = max(risk_results, key=lambda r: r.objective_penalty)
-            penalty = worst_risk.objective_penalty
-            pair_str = f"{worst_risk.source_qubit_id} <-> {worst_risk.target_qubit_id}"
-            
-            if worst_risk.severity == "HIGH":
-                st.metric("Worst Pair Risk", f"{penalty:.3f} (HIGH)")
-                st.caption(f"**High Risk Pair:** {pair_str}")
-            else:
-                st.metric("Worst Pair Risk", f"{penalty:.3f}")
-                st.caption(f"Highest-risk pair: {pair_str}")
-
-        st.divider()
-
-        st.markdown("### Visual Q-DRC Dashboard")
+    st.divider()
+    st.markdown("### Visual Q-DRC Dashboard")
     if len(project.qubits) < 2:
-        st.info("No checks available.\nAdd at least two qubits to begin pairwise analysis.")
+        st.info("No checks available. Add at least two qubits to begin pairwise analysis.")
     else:
         if not drc.violations and not drc.warnings:
-            st.success("🟢 **Q-DRC PASS**\n\nNo active violations detected.")
+            st.success("🟢 **Q-DRC PASS** — All layout constraints satisfied.")
         else:
             if drc.violations:
                 st.error(f"🔴 **FAIL — {len(drc.violations)} violation(s)**")
@@ -630,10 +610,10 @@ def render_analyze_tab(project):
     st.divider()
     st.markdown("### 🔍 Qubit Inspector")
     if not project.qubits:
-        st.info("No qubits available.\n\nAdd a qubit in the Design tab to inspect it.")
+        st.info("No qubits available. Add a qubit in the Design tab to inspect it.")
     else:
         q_ids = [q.id for q in project.qubits]
-        selected_q_id = st.selectbox("Select Qubit", options=q_ids, key="inspect_q_id_analyze")
+        selected_q_id = st.selectbox("Select Qubit ID", options=q_ids, key="inspect_q_id_analyze")
         if selected_q_id:
             q = next((q for q in project.qubits if q.id == selected_q_id), None)
             if q:
@@ -647,18 +627,25 @@ def render_analyze_tab(project):
                             nearest_dist = dist
                             nearest_id = other_q.id
                 
-                nearest_str = f"{nearest_id}\nDistance: {nearest_dist:.1f} um" if nearest_id else "N/A — only one qubit"
+                nearest_str = f"{nearest_id} ({nearest_dist:.1f} µm)" if nearest_id else "None"
                 
                 q_risks = [r for r in risk_results if r.source_qubit_id == q.id or r.target_qubit_id == q.id]
                 
                 if q_risks:
                     worst = max(q_risks, key=lambda r: r.objective_penalty)
                     icon = "🔴" if worst.severity == "HIGH" else "🟡" if worst.severity == "MEDIUM" else "🟢"
-                    worst_str = f"{icon} {worst.severity}\nPenalty: {worst.objective_penalty:.3f}\nPair: {worst.source_qubit_id} ↔ {worst.target_qubit_id}"
+                    worst_str = f"{icon} {worst.severity} (Penalty: {worst.objective_penalty:.3f}, Pair: {worst.source_qubit_id} ↔ {worst.target_qubit_id})"
                 else:
-                    worst_str = "N/A"
+                    worst_str = "🟢 LOW / None"
                     
-                st.info(f"**QUBIT INSPECTOR — {q.id}**\n\n**Position**\nX: {q.x_um:.1f} µm    Y: {q.y_um:.1f} µm\n\n**Frequency**\n{q.frequency_mhz:,.0f} MHz\n\n**Nearest Neighbor**\n{nearest_str}\n\n**Worst Pair Risk**\n{worst_str}")
+                st.info(
+                    f"**QUBIT INSPECTOR — {q.id}**\n\n"
+                    f"• **Position:** X: {q.x_um:.1f} µm, Y: {q.y_um:.1f} µm\n\n"
+                    f"• **Frequency:** {q.frequency_mhz:,.0f} MHz\n\n"
+                    f"• **Nearest Neighbor:** {nearest_str}\n\n"
+                    f"• **Worst Pair Risk:** {worst_str}\n\n"
+                    f"• **Recommended Mitigation:** Increase spatial or frequency separation, then re-evaluate the layout."
+                )
 
     st.divider()
     st.subheader("⚠ Pair Risk Analysis")
